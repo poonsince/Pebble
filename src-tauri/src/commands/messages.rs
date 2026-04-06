@@ -1,9 +1,54 @@
 use crate::state::AppState;
-use pebble_core::{FolderRole, Message, MessageSummary, PebbleError, PrivacyMode, RenderedHtml, TrustType};
-use pebble_mail::{ImapConfig, ImapProvider};
+use crate::commands::oauth::ensure_account_oauth_tokens;
+use pebble_core::traits::LabelProvider;
+use pebble_core::{FolderRole, Message, MessageSummary, PebbleError, PrivacyMode, ProviderType, RenderedHtml, TrustType};
+use pebble_mail::{GmailProvider, ImapConfig, ImapProvider};
 use pebble_privacy::PrivacyGuard;
 use tauri::State;
 use tracing::{info, warn};
+
+async fn connect_gmail(
+    state: &AppState,
+    account_id: &str,
+) -> std::result::Result<GmailProvider, PebbleError> {
+    let tokens = ensure_account_oauth_tokens(state, account_id, "gmail").await?;
+    Ok(GmailProvider::new(tokens.access_token))
+}
+
+fn refresh_search_document(
+    state: &AppState,
+    message_id: &str,
+) -> std::result::Result<(), PebbleError> {
+    match state.store.get_message(message_id)? {
+        Some(message) if !message.is_deleted => {
+            let folder_ids = state.store.get_message_folder_ids(message_id)?;
+            if folder_ids.is_empty() {
+                state.search.remove_message(message_id)?;
+            } else {
+                state.search.index_message(&message, &folder_ids)?;
+            }
+        }
+        Some(_) | None => {
+            state.search.remove_message(message_id)?;
+        }
+    }
+
+    state.search.commit()?;
+    Ok(())
+}
+
+fn remove_search_documents(
+    state: &AppState,
+    message_ids: &[String],
+) -> std::result::Result<(), PebbleError> {
+    for message_id in message_ids {
+        state.search.remove_message(message_id)?;
+    }
+    if !message_ids.is_empty() {
+        state.search.commit()?;
+    }
+    Ok(())
+}
 
 #[tauri::command]
 pub async fn list_messages(
@@ -42,13 +87,7 @@ pub async fn get_messages_batch(
     state: State<'_, AppState>,
     message_ids: Vec<String>,
 ) -> std::result::Result<Vec<Message>, PebbleError> {
-    let mut results = Vec::with_capacity(message_ids.len());
-    for id in &message_ids {
-        if let Some(msg) = state.store.get_message(id)? {
-            results.push(msg);
-        }
-    }
-    Ok(results)
+    state.store.get_messages_batch(&message_ids)
 }
 
 #[tauri::command]
@@ -132,23 +171,61 @@ pub async fn update_message_flags(
         .store
         .update_message_flags(&message_id, is_read, is_starred)?;
 
-    // 2. Async IMAP writeback (fire-and-forget)
+    // 2. Provider-specific remote writeback (fire-and-forget)
     if let Ok(Some(msg)) = state.store.get_message(&message_id) {
-        if let Ok(folder) = find_message_folder(&state, &message_id, &msg.account_id) {
-            if let Ok(uid) = msg.remote_id.parse::<u32>() {
-                if let Ok(imap_config) = get_imap_config(&state, &msg.account_id) {
-                    let remote_id = folder.remote_id.clone();
-                    tokio::task::spawn(async move {
-                        let provider = ImapProvider::new(imap_config);
-                        if let Err(e) = provider.connect().await {
-                            warn!("IMAP flag writeback connect failed: {e}");
-                            return;
+        let provider_type = state
+            .store
+            .get_account(&msg.account_id)?
+            .map(|account| account.provider);
+
+        match provider_type {
+            Some(ProviderType::Gmail) => {
+                let mut add = Vec::new();
+                let mut remove = Vec::new();
+                if let Some(read) = is_read {
+                    if read {
+                        remove.push("UNREAD".to_string());
+                    } else {
+                        add.push("UNREAD".to_string());
+                    }
+                }
+                if let Some(starred) = is_starred {
+                    if starred {
+                        add.push("STARRED".to_string());
+                    } else {
+                        remove.push("STARRED".to_string());
+                    }
+                }
+
+                if !add.is_empty() || !remove.is_empty() {
+                    let remote_id = msg.remote_id.clone();
+                    if let Ok(provider) = connect_gmail(&state, &msg.account_id).await {
+                        tokio::task::spawn(async move {
+                            if let Err(e) = provider.modify_labels(&remote_id, &add, &remove).await {
+                                warn!("Gmail flag writeback failed: {e}");
+                            }
+                        });
+                    }
+                }
+            }
+            Some(ProviderType::Imap) | Some(ProviderType::Outlook) | None => {
+                if let Ok(folder) = find_message_folder(&state, &message_id, &msg.account_id) {
+                    if let Ok(uid) = msg.remote_id.parse::<u32>() {
+                        if let Ok(imap_config) = get_imap_config(&state, &msg.account_id) {
+                            let remote_id = folder.remote_id.clone();
+                            tokio::task::spawn(async move {
+                                let provider = ImapProvider::new(imap_config);
+                                if let Err(e) = provider.connect().await {
+                                    warn!("IMAP flag writeback connect failed: {e}");
+                                    return;
+                                }
+                                if let Err(e) = provider.set_flags(&remote_id, uid, is_read, is_starred).await {
+                                    warn!("IMAP flag writeback failed: {e}");
+                                }
+                                let _ = provider.disconnect().await;
+                            });
                         }
-                        if let Err(e) = provider.set_flags(&remote_id, uid, is_read, is_starred).await {
-                            warn!("IMAP flag writeback failed: {e}");
-                        }
-                        let _ = provider.disconnect().await;
-                    });
+                    }
                 }
             }
         }
@@ -215,13 +292,26 @@ pub async fn archive_message(
 ) -> std::result::Result<String, PebbleError> {
     let msg = state.store.get_message(&message_id)?
         .ok_or_else(|| PebbleError::Internal(format!("Message not found: {message_id}")))?;
+    let provider_type = state
+        .store
+        .get_account(&msg.account_id)?
+        .map(|account| account.provider)
+        .ok_or_else(|| PebbleError::Internal(format!("Account not found: {}", msg.account_id)))?;
 
     let source_folder = find_message_folder(&state, &message_id, &msg.account_id)?;
     // If the message is already in an archive folder, unarchive it (move to inbox)
     if source_folder.role == Some(FolderRole::Archive) {
         info!("Message {} already in archive, restoring to inbox", message_id);
         let inbox = find_folder_by_role(&state, &msg.account_id, FolderRole::Inbox)?;
+        if matches!(provider_type, ProviderType::Gmail) {
+            if let Ok(provider) = connect_gmail(&state, &msg.account_id).await {
+                if let Err(e) = provider.modify_labels(&msg.remote_id, &["INBOX".to_string()], &[]).await {
+                    warn!("Gmail unarchive failed: {e}");
+                }
+            }
+        }
         state.store.move_message_to_folder(&message_id, &inbox.id)?;
+        refresh_search_document(&state, &message_id)?;
         return Ok("unarchived".to_string());
     }
 
@@ -229,29 +319,42 @@ pub async fn archive_message(
     match find_folder_by_role(&state, &msg.account_id, FolderRole::Archive) {
         Ok(archive_folder) => {
             let is_local = archive_folder.remote_id.starts_with("__local_");
-            // Move on IMAP server (only if archive folder exists on server)
-            if !is_local {
-                let uid: u32 = msg.remote_id.parse()
-                    .map_err(|_| PebbleError::Internal("Invalid remote_id (not a UID)".to_string()))?;
-                match connect_imap(&state, &msg.account_id).await {
-                    Ok(imap) => {
-                        imap.move_message(&source_folder.remote_id, uid, &archive_folder.remote_id).await?;
-                        imap.disconnect().await?;
-                        info!("Archived message {} (UID {}) from {} to {}", message_id, uid, source_folder.name, archive_folder.name);
+            match provider_type {
+                ProviderType::Gmail => {
+                    if let Ok(provider) = connect_gmail(&state, &msg.account_id).await {
+                        if let Err(e) = provider.modify_labels(&msg.remote_id, &[], &["INBOX".to_string()]).await {
+                            warn!("Gmail archive failed: {e}");
+                        }
                     }
-                    Err(e) => {
-                        tracing::warn!("IMAP connect failed for archive: {e}");
+                }
+                ProviderType::Imap | ProviderType::Outlook => {
+                    // Move on IMAP server (only if archive folder exists on server)
+                    if !is_local {
+                        let uid: u32 = msg.remote_id.parse()
+                            .map_err(|_| PebbleError::Internal("Invalid remote_id (not a UID)".to_string()))?;
+                        match connect_imap(&state, &msg.account_id).await {
+                            Ok(imap) => {
+                                imap.move_message(&source_folder.remote_id, uid, &archive_folder.remote_id).await?;
+                                imap.disconnect().await?;
+                                info!("Archived message {} (UID {}) from {} to {}", message_id, uid, source_folder.name, archive_folder.name);
+                            }
+                            Err(e) => {
+                                tracing::warn!("IMAP connect failed for archive: {e}");
+                            }
+                        }
                     }
                 }
             }
             // Move locally to archive folder so user can see it there
             state.store.move_message_to_folder(&message_id, &archive_folder.id)?;
+            refresh_search_document(&state, &message_id)?;
             Ok("archived".to_string())
         }
         Err(_) => {
             // No archive folder — soft-delete as fallback
             info!("No archive folder found, soft-deleting message {} locally", message_id);
             state.store.soft_delete_message(&message_id)?;
+            refresh_search_document(&state, &message_id)?;
             Ok("archived".to_string())
         }
     }
@@ -264,33 +367,57 @@ pub async fn delete_message(
 ) -> std::result::Result<(), PebbleError> {
     let msg = state.store.get_message(&message_id)?
         .ok_or_else(|| PebbleError::Internal(format!("Message not found: {message_id}")))?;
+    let provider_type = state
+        .store
+        .get_account(&msg.account_id)?
+        .map(|account| account.provider)
+        .ok_or_else(|| PebbleError::Internal(format!("Account not found: {}", msg.account_id)))?;
 
     let source_folder = find_message_folder(&state, &message_id, &msg.account_id)?;
 
-    // Try IMAP operations but don't block local deletion on failure
-    if let Ok(uid) = msg.remote_id.parse::<u32>() {
-        match connect_imap(&state, &msg.account_id).await {
-            Ok(imap) => {
-                match find_folder_by_role(&state, &msg.account_id, FolderRole::Trash) {
-                    Ok(ref trash_folder) if trash_folder.id != source_folder.id => {
-                        if let Err(e) = imap.move_message(&source_folder.remote_id, uid, &trash_folder.remote_id).await {
-                            tracing::warn!("IMAP move to trash failed: {e}");
-                        } else {
-                            info!("Moved message {} to Trash on server", message_id);
-                        }
-                    }
-                    _ => {
-                        if let Err(e) = imap.delete_message(&source_folder.remote_id, uid).await {
-                            tracing::warn!("IMAP delete failed: {e}");
-                        } else {
-                            info!("Permanently deleted message {} (UID {})", message_id, uid);
-                        }
+    match provider_type {
+        ProviderType::Gmail => {
+            if source_folder.role == Some(FolderRole::Trash) {
+                if let Ok(provider) = connect_gmail(&state, &msg.account_id).await {
+                    if let Err(e) = provider.delete_message_permanently(&msg.remote_id).await {
+                        warn!("Gmail permanent delete failed: {e}");
                     }
                 }
-                let _ = imap.disconnect().await;
+            } else if let Ok(provider) = connect_gmail(&state, &msg.account_id).await {
+                if let Err(e) = provider.trash_message(&msg.remote_id).await {
+                    warn!("Gmail trash move failed: {e}");
+                } else {
+                    info!("Moved Gmail message {} to Trash on server", message_id);
+                }
             }
-            Err(e) => {
-                tracing::warn!("IMAP connect failed for delete: {e}");
+        }
+        ProviderType::Imap | ProviderType::Outlook => {
+            // Try IMAP operations but don't block local deletion on failure
+            if let Ok(uid) = msg.remote_id.parse::<u32>() {
+                match connect_imap(&state, &msg.account_id).await {
+                    Ok(imap) => {
+                        match find_folder_by_role(&state, &msg.account_id, FolderRole::Trash) {
+                            Ok(ref trash_folder) if trash_folder.id != source_folder.id => {
+                                if let Err(e) = imap.move_message(&source_folder.remote_id, uid, &trash_folder.remote_id).await {
+                                    tracing::warn!("IMAP move to trash failed: {e}");
+                                } else {
+                                    info!("Moved message {} to Trash on server", message_id);
+                                }
+                            }
+                            _ => {
+                                if let Err(e) = imap.delete_message(&source_folder.remote_id, uid).await {
+                                    tracing::warn!("IMAP delete failed: {e}");
+                                } else {
+                                    info!("Permanently deleted message {} (UID {})", message_id, uid);
+                                }
+                            }
+                        }
+                        let _ = imap.disconnect().await;
+                    }
+                    Err(e) => {
+                        tracing::warn!("IMAP connect failed for delete: {e}");
+                    }
+                }
             }
         }
     }
@@ -305,6 +432,7 @@ pub async fn delete_message(
         }
     }
 
+    refresh_search_document(&state, &message_id)?;
     Ok(())
 }
 
@@ -315,6 +443,11 @@ pub async fn restore_message(
 ) -> std::result::Result<(), PebbleError> {
     let msg = state.store.get_message(&message_id)?
         .ok_or_else(|| PebbleError::Internal(format!("Message not found: {message_id}")))?;
+    let provider_type = state
+        .store
+        .get_account(&msg.account_id)?
+        .map(|account| account.provider)
+        .ok_or_else(|| PebbleError::Internal(format!("Account not found: {}", msg.account_id)))?;
 
     let inbox = find_folder_by_role(&state, &msg.account_id, FolderRole::Inbox)?;
 
@@ -324,19 +457,38 @@ pub async fn restore_message(
     // Move locally to inbox
     state.store.move_message_to_folder(&message_id, &inbox.id)?;
 
-    // Try to move on IMAP server too (skip for local-only folders)
-    if let Ok(uid) = msg.remote_id.parse::<u32>() {
-        if let Some(ref src) = source_folder {
-            let is_local = src.remote_id.starts_with("__local_");
-            if !is_local && src.id != inbox.id {
-                if let Ok(imap) = connect_imap(&state, &msg.account_id).await {
-                    let _ = imap.move_message(&src.remote_id, uid, &inbox.remote_id).await;
-                    let _ = imap.disconnect().await;
+    match provider_type {
+        ProviderType::Gmail => {
+            if let Some(ref src) = source_folder {
+                if let Ok(provider) = connect_gmail(&state, &msg.account_id).await {
+                    let result = if src.role == Some(FolderRole::Trash) {
+                        provider.untrash_message(&msg.remote_id).await
+                    } else {
+                        provider.modify_labels(&msg.remote_id, &["INBOX".to_string()], &[]).await
+                    };
+                    if let Err(e) = result {
+                        warn!("Gmail restore failed: {e}");
+                    }
+                }
+            }
+        }
+        ProviderType::Imap | ProviderType::Outlook => {
+            // Try to move on IMAP server too (skip for local-only folders)
+            if let Ok(uid) = msg.remote_id.parse::<u32>() {
+                if let Some(ref src) = source_folder {
+                    let is_local = src.remote_id.starts_with("__local_");
+                    if !is_local && src.id != inbox.id {
+                        if let Ok(imap) = connect_imap(&state, &msg.account_id).await {
+                            let _ = imap.move_message(&src.remote_id, uid, &inbox.remote_id).await;
+                            let _ = imap.disconnect().await;
+                        }
+                    }
                 }
             }
         }
     }
 
+    refresh_search_document(&state, &message_id)?;
     info!("Restored message {} to inbox", message_id);
     Ok(())
 }
@@ -348,6 +500,11 @@ pub async fn empty_trash(
 ) -> std::result::Result<u32, PebbleError> {
     let trash = find_folder_by_role(&state, &account_id, FolderRole::Trash)?;
     let messages = state.store.list_messages_by_folder(&trash.id, 10000, 0)?;
+    let provider_type = state
+        .store
+        .get_account(&account_id)?
+        .map(|account| account.provider)
+        .ok_or_else(|| PebbleError::Internal(format!("Account not found: {account_id}")))?;
 
     if messages.is_empty() {
         return Ok(0);
@@ -355,19 +512,31 @@ pub async fn empty_trash(
 
     let count = messages.len() as u32;
 
-    // Try to permanently delete on IMAP server
-    if let Ok(imap) = connect_imap(&state, &account_id).await {
-        for msg in &messages {
-            if let Ok(uid) = msg.remote_id.parse::<u32>() {
-                let _ = imap.delete_message(&trash.remote_id, uid).await;
+    match provider_type {
+        ProviderType::Gmail => {
+            if let Ok(provider) = connect_gmail(&state, &account_id).await {
+                for msg in &messages {
+                    let _ = provider.delete_message_permanently(&msg.remote_id).await;
+                }
             }
         }
-        let _ = imap.disconnect().await;
+        ProviderType::Imap | ProviderType::Outlook => {
+            // Try to permanently delete on IMAP server
+            if let Ok(imap) = connect_imap(&state, &account_id).await {
+                for msg in &messages {
+                    if let Ok(uid) = msg.remote_id.parse::<u32>() {
+                        let _ = imap.delete_message(&trash.remote_id, uid).await;
+                    }
+                }
+                let _ = imap.disconnect().await;
+            }
+        }
     }
 
     // Permanently delete locally (hard delete, not soft delete + purge)
     let ids: Vec<String> = messages.iter().map(|m| m.id.clone()).collect();
     state.store.hard_delete_messages(&ids)?;
+    remove_search_documents(&state, &ids)?;
 
     info!("Emptied trash: {} messages permanently deleted", count);
     Ok(count)

@@ -107,6 +107,7 @@ pub fn run() {
             commands::kanban::list_kanban_cards,
             commands::kanban::remove_from_kanban,
             commands::labels::get_message_labels,
+            commands::labels::get_message_labels_batch,
             commands::labels::add_message_label,
             commands::labels::remove_message_label,
             commands::labels::list_labels,

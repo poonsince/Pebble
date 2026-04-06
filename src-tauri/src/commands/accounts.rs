@@ -1,6 +1,8 @@
 use crate::state::AppState;
+use crate::commands::oauth::ensure_account_oauth_tokens;
 use pebble_core::{Account, PebbleError, ProviderType, new_id, now_timestamp};
 use pebble_mail::ConnectionSecurity;
+use pebble_mail::GmailProvider;
 use serde::Deserialize;
 use tauri::State;
 
@@ -204,6 +206,21 @@ pub async fn test_account_connection(
     state: State<'_, AppState>,
     account_id: String,
 ) -> std::result::Result<String, PebbleError> {
+    let account = state
+        .store
+        .get_account(&account_id)?
+        .ok_or_else(|| PebbleError::Internal(format!("Account not found: {account_id}")))?;
+
+    if matches!(account.provider, ProviderType::Gmail) {
+        let tokens = ensure_account_oauth_tokens(&state, &account_id, "gmail").await?;
+        let provider = GmailProvider::new(tokens.access_token);
+        let (email, _history_id) = provider.get_profile().await?;
+        if email.is_empty() {
+            return Ok("Gmail connection successful".to_string());
+        }
+        return Ok(format!("Gmail connection successful ({email})"));
+    }
+
     let existing = state.store.get_auth_data(&account_id)?
         .ok_or_else(|| PebbleError::Internal("No auth data found".into()))?;
     let decrypted = state.crypto.decrypt(&existing)?;

@@ -320,6 +320,9 @@ async fn index_new_messages(
     rx: &mut mpsc::UnboundedReceiver<pebble_mail::StoredMessage>,
     app: Option<tauri::AppHandle>,
 ) {
+    const COMMIT_BATCH_SIZE: u32 = 20;
+    const COMMIT_IDLE_SECS: u64 = 2;
+
     // Load rules once at the start of the sync session
     let engine = match store.list_rules() {
         Ok(rules) if !rules.is_empty() => {
@@ -334,7 +337,26 @@ async fn index_new_messages(
     };
 
     let mut pending = 0u32;
-    while let Some(stored) = rx.recv().await {
+    loop {
+        let stored = match tokio::time::timeout(
+            tokio::time::Duration::from_secs(COMMIT_IDLE_SECS),
+            rx.recv(),
+        )
+        .await
+        {
+            Ok(Some(stored)) => stored,
+            Ok(None) => break,
+            Err(_) => {
+                if pending > 0 {
+                    if let Err(e) = search.commit() {
+                        error!("Failed to commit search index after idle flush: {}", e);
+                    }
+                    pending = 0;
+                }
+                continue;
+            }
+        };
+
         // Emit new mail event to frontend
         if let Some(ref app) = app {
             let _ = app.emit(
@@ -358,14 +380,46 @@ async fn index_new_messages(
             }
         }
 
-        if let Err(e) = search.index_message(&stored.message, &stored.folder_ids) {
-            warn!("Failed to index message {}: {}", stored.message.id, e);
-            continue;
+        let message_id = stored.message.id.clone();
+        let latest_message = match store.get_message(&message_id) {
+            Ok(message) => message,
+            Err(e) => {
+                warn!("Failed to reload message {} before indexing: {}", message_id, e);
+                continue;
+            }
+        };
+
+        match latest_message {
+            Some(message) if !message.is_deleted => {
+                let folder_ids = match store.get_message_folder_ids(&message_id) {
+                    Ok(folder_ids) => folder_ids,
+                    Err(e) => {
+                        warn!("Failed to load folders for indexed message {}: {}", message_id, e);
+                        continue;
+                    }
+                };
+
+                if folder_ids.is_empty() {
+                    if let Err(e) = search.remove_message(&message_id) {
+                        warn!("Failed to remove folderless search document {}: {}", message_id, e);
+                        continue;
+                    }
+                } else if let Err(e) = search.index_message(&message, &folder_ids) {
+                    warn!("Failed to index message {}: {}", message_id, e);
+                    continue;
+                }
+            }
+            Some(_) | None => {
+                if let Err(e) = search.remove_message(&message_id) {
+                    warn!("Failed to remove stale search document {}: {}", message_id, e);
+                    continue;
+                }
+            }
         }
         pending += 1;
 
         // Commit in batches to avoid excessive I/O
-        if pending >= 50 {
+        if pending >= COMMIT_BATCH_SIZE {
             if let Err(e) = search.commit() {
                 error!("Failed to commit search index: {}", e);
             }

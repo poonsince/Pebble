@@ -26,7 +26,7 @@ pub async fn backup_to_webdav(
     let data = state.store.export_settings()?;
     let client = WebDavClient::new(url, username, password)?;
     client.upload(BACKUP_FILENAME, &data).await?;
-    Ok("Backup completed successfully".to_string())
+    Ok("Settings backup completed successfully".to_string())
 }
 
 #[tauri::command]
@@ -39,5 +39,5 @@ pub async fn restore_from_webdav(
     let client = WebDavClient::new(url, username, password)?;
     let data = client.download(BACKUP_FILENAME).await?;
     state.store.import_settings(&data)?;
-    Ok("Restore completed successfully".to_string())
+    Ok("Settings backup restored. Reconnect accounts to continue syncing.".to_string())
 }

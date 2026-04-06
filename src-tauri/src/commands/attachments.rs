@@ -3,6 +3,34 @@ use pebble_core::{Attachment, PebbleError};
 use std::path::Path;
 use tauri::State;
 
+fn is_windows_reserved_name(name: &str) -> bool {
+    matches!(
+        name.trim().to_ascii_uppercase().as_str(),
+        "CON"
+            | "PRN"
+            | "AUX"
+            | "NUL"
+            | "COM1"
+            | "COM2"
+            | "COM3"
+            | "COM4"
+            | "COM5"
+            | "COM6"
+            | "COM7"
+            | "COM8"
+            | "COM9"
+            | "LPT1"
+            | "LPT2"
+            | "LPT3"
+            | "LPT4"
+            | "LPT5"
+            | "LPT6"
+            | "LPT7"
+            | "LPT8"
+            | "LPT9"
+    )
+}
+
 /// Validate that save_to path is within a safe directory (user's home).
 fn validate_save_path(save_to: &str) -> Result<(), PebbleError> {
     let path = Path::new(save_to);
@@ -19,6 +47,25 @@ fn validate_save_path(save_to: &str) -> Result<(), PebbleError> {
     if filename_str.contains("..") || filename_str.contains('/') || filename_str.contains('\\') {
         return Err(PebbleError::Internal(
             "Invalid filename in save path".to_string(),
+        ));
+    }
+    if filename_str.ends_with(' ') || filename_str.ends_with('.') {
+        return Err(PebbleError::Validation(
+            "Filename cannot end with a dot or space".to_string(),
+        ));
+    }
+    if filename_str.chars().any(|c| matches!(c, '<' | '>' | ':' | '"' | '|' | '?' | '*')) {
+        return Err(PebbleError::Validation(
+            "Filename contains characters unsupported on Windows".to_string(),
+        ));
+    }
+    let stem = Path::new(filename)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or_default();
+    if is_windows_reserved_name(stem) {
+        return Err(PebbleError::Validation(
+            "Filename is reserved on Windows".to_string(),
         ));
     }
 

@@ -12,6 +12,14 @@ pub async fn get_message_labels(
 }
 
 #[tauri::command]
+pub async fn get_message_labels_batch(
+    state: State<'_, AppState>,
+    message_ids: Vec<String>,
+) -> std::result::Result<std::collections::HashMap<String, Vec<Label>>, PebbleError> {
+    state.store.get_message_labels_batch(&message_ids)
+}
+
+#[tauri::command]
 pub async fn add_message_label(
     state: State<'_, AppState>,
     message_id: String,

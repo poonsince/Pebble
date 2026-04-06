@@ -1,5 +1,5 @@
 use crate::state::AppState;
-use pebble_core::{Account, PebbleError, ProviderType, new_id, now_timestamp};
+use pebble_core::{Account, OAuthTokens, PebbleError, ProviderType, new_id, now_timestamp};
 use pebble_oauth::{OAuthConfig, OAuthManager};
 use tauri::State;
 use tracing::debug;
@@ -51,7 +51,7 @@ async fn fetch_userinfo(provider: &str, access_token: &str) -> Result<(String, S
 }
 
 /// OAuth config for Gmail (Google).
-fn gmail_oauth_config() -> OAuthConfig {
+pub(crate) fn gmail_oauth_config() -> OAuthConfig {
     OAuthConfig {
         client_id: option_env!("GOOGLE_CLIENT_ID")
             .unwrap_or("GOOGLE_CLIENT_ID_PLACEHOLDER")
@@ -73,7 +73,7 @@ fn gmail_oauth_config() -> OAuthConfig {
 }
 
 /// OAuth config for Outlook (Microsoft).
-fn outlook_oauth_config() -> OAuthConfig {
+pub(crate) fn outlook_oauth_config() -> OAuthConfig {
     OAuthConfig {
         client_id: std::env::var("MICROSOFT_CLIENT_ID")
             .unwrap_or_else(|_| "MICROSOFT_CLIENT_ID_PLACEHOLDER".to_string()),
@@ -91,7 +91,7 @@ fn outlook_oauth_config() -> OAuthConfig {
 }
 
 /// Resolve an `OAuthConfig` from a provider name, or return an error.
-fn config_for_provider(provider: &str) -> Result<OAuthConfig, PebbleError> {
+pub(crate) fn config_for_provider(provider: &str) -> Result<OAuthConfig, PebbleError> {
     match provider.to_lowercase().as_str() {
         "gmail" => Ok(gmail_oauth_config()),
         "outlook" => Ok(outlook_oauth_config()),
@@ -108,6 +108,65 @@ fn provider_type(provider: &str) -> Result<ProviderType, PebbleError> {
         "outlook" => Ok(ProviderType::Outlook),
         _ => Err(PebbleError::UnsupportedProvider(provider.to_string())),
     }
+}
+
+pub(crate) fn provider_slug(provider: &ProviderType) -> &'static str {
+    match provider {
+        ProviderType::Imap => "imap",
+        ProviderType::Gmail => "gmail",
+        ProviderType::Outlook => "outlook",
+    }
+}
+
+fn persist_oauth_tokens(
+    state: &AppState,
+    account_id: &str,
+    tokens: &OAuthTokens,
+) -> Result<(), PebbleError> {
+    let config_bytes = serde_json::to_vec(tokens)
+        .map_err(|e| PebbleError::Internal(format!("Failed to serialize tokens: {e}")))?;
+    let encrypted = state.crypto.encrypt(&config_bytes)?;
+    state.store.set_auth_data(account_id, &encrypted)?;
+    Ok(())
+}
+
+pub(crate) async fn ensure_account_oauth_tokens(
+    state: &AppState,
+    account_id: &str,
+    provider: &str,
+) -> Result<OAuthTokens, PebbleError> {
+    let encrypted = state
+        .store
+        .get_auth_data(account_id)?
+        .ok_or_else(|| PebbleError::Internal(format!("No auth data found for account {account_id}")))?;
+    let decrypted = state.crypto.decrypt(&encrypted)?;
+    let mut tokens: OAuthTokens = serde_json::from_slice(&decrypted)
+        .map_err(|e| PebbleError::Internal(format!("Failed to parse OAuth tokens: {e}")))?;
+
+    let needs_refresh = tokens.refresh_token.is_some()
+        && tokens
+            .expires_at
+            .map(|exp| exp - now_timestamp() < 300)
+            .unwrap_or(false);
+
+    if needs_refresh {
+        let refresh_token = tokens.refresh_token.clone().unwrap_or_default();
+        let manager = OAuthManager::new(config_for_provider(provider)?);
+        let token_pair = manager
+            .refresh_token(&refresh_token)
+            .await
+            .map_err(|e| PebbleError::OAuth(format!("Token refresh failed: {e}")))?;
+
+        tokens = OAuthTokens {
+            access_token: token_pair.access_token,
+            refresh_token: token_pair.refresh_token.or(Some(refresh_token)),
+            expires_at: token_pair.expires_at,
+            scopes: token_pair.scopes,
+        };
+        persist_oauth_tokens(state, account_id, &tokens)?;
+    }
+
+    Ok(tokens)
 }
 
 /// Start the OAuth flow for a provider.
@@ -195,19 +254,16 @@ pub async fn complete_oauth_flow(
     state.store.insert_account(&account)?;
 
     // Encrypt tokens and store as auth_data
-    let tokens_json = serde_json::json!({
-        "access_token": token_pair.access_token,
-        "refresh_token": token_pair.refresh_token,
-        "expires_at": token_pair.expires_at,
-        "scopes": token_pair.scopes,
-    });
-    let config_bytes = serde_json::to_vec(&tokens_json)
-        .map_err(|e| PebbleError::Internal(format!("Failed to serialize tokens: {e}")))?;
-    let encrypted = state.crypto.encrypt(&config_bytes)?;
-    state.store.set_auth_data(&account.id, &encrypted)?;
+    let tokens = OAuthTokens {
+        access_token: token_pair.access_token,
+        refresh_token: token_pair.refresh_token,
+        expires_at: token_pair.expires_at,
+        scopes: token_pair.scopes,
+    };
+    persist_oauth_tokens(&state, &account.id, &tokens)?;
 
     // Store provider metadata in sync_state
-    let metadata = serde_json::json!({ "provider": provider.to_lowercase() });
+    let metadata = serde_json::json!({ "provider": provider_slug(&account.provider) });
     let metadata_json = serde_json::to_string(&metadata)
         .map_err(|e| PebbleError::Internal(format!("Failed to serialize metadata: {e}")))?;
     state
