@@ -30,7 +30,11 @@ export default function ThreadItem({ thread, isSelected, onClick }: Props) {
 
   return (
     <div
+      role="option"
+      aria-selected={isSelected}
+      tabIndex={0}
       onClick={onClick}
+      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onClick(); } }}
       style={{
         backgroundColor: isSelected ? "var(--color-sidebar-active)" : "transparent",
         color: "var(--color-text-primary)",

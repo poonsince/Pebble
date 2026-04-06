@@ -1,8 +1,8 @@
 import { useState, useCallback, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { Search, SlidersHorizontal, Loader } from "lucide-react";
-import type { AdvancedSearchQuery, SearchHit, Message } from "@/lib/api";
-import { advancedSearch, searchMessages, getMessagesBatch } from "@/lib/api";
+import type { AdvancedSearchQuery, SearchHit } from "@/lib/api";
+import { advancedSearch, searchMessages } from "@/lib/api";
 import { useUIStore } from "@/stores/ui.store";
 import SearchFilters from "./SearchFilters";
 import SearchResultItem from "./SearchResultItem";
@@ -28,7 +28,6 @@ export default function SearchView() {
   const [filters, setFilters] = useState<AdvancedSearchQuery>(emptyFilters);
   const [showFilters, setShowFilters] = useState(false);
   const [results, setResults] = useState<SearchHit[]>([]);
-  const [messages, setMessages] = useState<Record<string, Message | null>>({});
   const [loading, setLoading] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [hasSearched, setHasSearched] = useState(false);
@@ -75,30 +74,6 @@ export default function SearchView() {
       });
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Fetch message details for results
-  useEffect(() => {
-    const idsToFetch = results
-      .map((h) => h.message_id)
-      .filter((id) => !(id in messages));
-
-    if (idsToFetch.length === 0) return;
-
-    let cancelled = false;
-    getMessagesBatch(idsToFetch).then((msgs) => {
-      if (cancelled) return;
-      const fetched: Record<string, Message | null> = {};
-      for (const msg of msgs) {
-        fetched[msg.id] = msg;
-      }
-      // Mark any IDs not returned as null (message deleted/missing)
-      for (const id of idsToFetch) {
-        if (!(id in fetched)) fetched[id] = null;
-      }
-      setMessages((prev) => ({ ...prev, ...fetched }));
-    }).catch(() => {});
-    return () => { cancelled = true; };
-  }, [results]); // eslint-disable-line react-hooks/exhaustive-deps
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -238,7 +213,6 @@ export default function SearchView() {
               <SearchResultItem
                 key={hit.message_id}
                 hit={hit}
-                message={messages[hit.message_id] ?? null}
                 isSelected={hit.message_id === selectedId}
                 onClick={() => setSelectedId(hit.message_id)}
               />

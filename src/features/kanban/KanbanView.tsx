@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import { DndContext, DragEndEvent, PointerSensor, useSensor, useSensors } from "@dnd-kit/core";
 import { arrayMove } from "@dnd-kit/sortable";
 import type { KanbanColumnType, Message } from "@/lib/api";
-import { getMessage } from "@/lib/api";
+import { getMessagesBatch } from "@/lib/api";
 import { useKanbanStore } from "@/stores/kanban.store";
 import { useUIStore } from "@/stores/ui.store";
 import { useMailStore } from "@/stores/mail.store";
@@ -29,20 +29,18 @@ export default function KanbanView() {
     fetchCards();
   }, [fetchCards]);
 
-  // Load message details for all cards
+  // Load message details for all cards (batch)
   useEffect(() => {
     async function loadMessages() {
       setMessages((prev) => {
         const toLoad = cards.filter((c) => !prev.has(c.message_id));
         if (toLoad.length === 0) return prev;
-        // Load in background, then update
-        Promise.all(
-          toLoad.map((card) => getMessage(card.message_id).then((msg) => [card.message_id, msg] as const)),
-        ).then((results) => {
+        const idsToFetch = toLoad.map((c) => c.message_id);
+        getMessagesBatch(idsToFetch).then((msgs) => {
           setMessages((current) => {
             const next = new Map(current);
-            for (const [id, msg] of results) {
-              if (msg) next.set(id, msg);
+            for (const msg of msgs) {
+              next.set(msg.id, msg);
             }
             return next;
           });

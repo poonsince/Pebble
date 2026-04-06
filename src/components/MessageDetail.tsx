@@ -7,7 +7,7 @@ import { useKanbanStore } from "@/stores/kanban.store";
 import { useToastStore } from "@/stores/toast.store";
 import { useTranslation } from "react-i18next";
 import { useUpdateFlagsMutation } from "@/hooks/mutations/useUpdateFlagsMutation";
-import DOMPurify from "dompurify";
+import { sanitizeHtml } from "@/lib/sanitizeHtml";
 import type { Message, MessageSummary, RenderedHtml, PrivacyMode, TranslateResult } from "@/lib/api";
 import { MessageDetailSkeleton } from "./Skeleton";
 import PrivacyBanner from "./PrivacyBanner";
@@ -15,28 +15,12 @@ import AttachmentList from "./AttachmentList";
 import SnoozePopover from "../features/inbox/SnoozePopover";
 import { ShadowDomEmail } from "./ShadowDomEmail";
 
-/** Sanitize HTML to prevent XSS while preserving email formatting */
-function sanitizeHtml(html: string): string {
-  return DOMPurify.sanitize(html, {
-    ALLOWED_TAGS: [
-      "a", "abbr", "address", "article", "b", "bdi", "bdo", "blockquote",
-      "br", "caption", "cite", "code", "col", "colgroup", "dd", "del",
-      "details", "dfn", "div", "dl", "dt", "em", "figcaption", "figure",
-      "footer", "h1", "h2", "h3", "h4", "h5", "h6", "header", "hr", "i",
-      "img", "ins", "kbd", "li", "main", "mark", "nav", "ol", "p", "pre",
-      "q", "rp", "rt", "ruby", "s", "samp", "section", "small", "span",
-      "strong", "sub", "summary", "sup", "table", "tbody", "td", "tfoot",
-      "th", "thead", "time", "tr", "u", "ul", "var", "wbr",
-    ],
-    ALLOWED_ATTR: [
-      "href", "src", "alt", "title", "width", "height", "style", "class",
-      "align", "valign", "bgcolor", "color", "border", "cellpadding",
-      "cellspacing", "colspan", "rowspan", "dir", "lang",
-    ],
-    ALLOW_DATA_ATTR: false,
-  });
-}
 import TranslatePopover from "../features/translate/TranslatePopover";
+
+// Translation cache: avoids re-translating on toggle or revisit (capped at 20 entries)
+const translationCache = new Map<string, TranslateResult & { _isHtml?: boolean }>();
+const TRANSLATION_CACHE_MAX = 20;
+const CHUNK_SIZE = 30; // Max text nodes per translation request
 
 interface Props {
   messageId: string;
@@ -194,14 +178,25 @@ export default function MessageDetail({ messageId, onBack, folderRole }: Props) 
       return;
     }
     if (!message) return;
+
+    const uiLang = localStorage.getItem("pebble-language") || "zh";
+    const cacheKey = `${messageId}:${uiLang}`;
+
+    // Check cache first
+    const cached = translationCache.get(cacheKey);
+    if (cached) {
+      setBilingualResult(cached);
+      setBilingualMode(true);
+      return;
+    }
+
     setBilingualMode(true);
     setBilingualLoading(true);
     try {
-      const uiLang = localStorage.getItem("pebble-language") || "zh";
       const hasHtml = !!(rendered && rendered.html);
 
       if (hasHtml) {
-        // HTML email: translate while preserving layout
+        // HTML email: translate in chunks while preserving layout
         const doc = new DOMParser().parseFromString(sanitizeHtml(rendered!.html), "text/html");
         const walker = doc.createTreeWalker(doc.body, NodeFilter.SHOW_TEXT);
         const textNodes: Text[] = [];
@@ -210,31 +205,52 @@ export default function MessageDetail({ messageId, onBack, folderRole }: Props) 
           if (n.textContent?.trim()) textNodes.push(n);
         }
 
-        if (textNodes.length > 0) {
-          // Use numbered lines so the translation API preserves the mapping
-          const numbered = textNodes.map((nd, i) => `[${i}] ${nd.textContent!.trim()}`).join("\n");
-          const result = await translateText(numbered, "auto", uiLang);
-          // Parse numbered lines back from translated text
-          const lineMap = new Map<number, string>();
-          for (const line of result.translated.split("\n")) {
-            const m = line.match(/^\[(\d+)\]\s*(.*)/);
-            if (m) lineMap.set(parseInt(m[1], 10), m[2]);
-          }
-          for (let i = 0; i < textNodes.length; i++) {
-            if (lineMap.has(i)) {
-              textNodes[i].textContent = lineMap.get(i)!;
+        // Translate in chunks to avoid timeouts on long emails.
+        // Uses a unique separator so we can reliably split the response,
+        // with numbered-index fallback for services that preserve them.
+        const SEP = "\n⸻\n";
+        for (let start = 0; start < textNodes.length; start += CHUNK_SIZE) {
+          const chunk = textNodes.slice(start, start + CHUNK_SIZE);
+          const batch = chunk.map((nd) => nd.textContent!.trim()).join(SEP);
+          const result = await translateText(batch, "auto", uiLang);
+
+          // Split on separator; if the service preserved it, we get exact mapping
+          const parts = result.translated.split("⸻").map((s) => s.trim()).filter(Boolean);
+          if (parts.length === chunk.length) {
+            // Exact 1:1 mapping
+            for (let i = 0; i < chunk.length; i++) {
+              chunk[i].textContent = parts[i];
+            }
+          } else {
+            // Fallback: replace the entire chunk's text with the translated result
+            // Split by newlines and try positional matching
+            const lines = result.translated.split("\n").map((s) => s.trim()).filter(Boolean);
+            for (let i = 0; i < Math.min(chunk.length, lines.length); i++) {
+              chunk[i].textContent = lines[i];
             }
           }
+          // Show progressive results after each chunk
+          const partial = { translated: sanitizeHtml(doc.body.innerHTML), segments: [], _isHtml: true } as TranslateResult & { _isHtml?: boolean };
+          setBilingualResult(partial);
         }
 
-        setBilingualResult({ translated: sanitizeHtml(doc.body.innerHTML), segments: [], _isHtml: true } as TranslateResult & { _isHtml?: boolean });
+        const final_ = { translated: sanitizeHtml(doc.body.innerHTML), segments: [], _isHtml: true } as TranslateResult & { _isHtml?: boolean };
+        setBilingualResult(final_);
+        if (translationCache.size >= TRANSLATION_CACHE_MAX) {
+          translationCache.delete(translationCache.keys().next().value!);
+        }
+        translationCache.set(cacheKey, final_);
       } else {
         // Plain text email
         const textToTranslate = message.body_text
           || new DOMParser().parseFromString(message.body_html_raw || "", "text/html").body.textContent
           || "";
-        const result = await translateText(textToTranslate, "auto", uiLang);
-        setBilingualResult({ ...result, _isHtml: false } as TranslateResult & { _isHtml?: boolean });
+        const result = { ...await translateText(textToTranslate, "auto", uiLang), _isHtml: false } as TranslateResult & { _isHtml?: boolean };
+        setBilingualResult(result);
+        if (translationCache.size >= TRANSLATION_CACHE_MAX) {
+          translationCache.delete(translationCache.keys().next().value!);
+        }
+        translationCache.set(cacheKey, result);
       }
     } catch (err) {
       console.error("Translation failed:", err);

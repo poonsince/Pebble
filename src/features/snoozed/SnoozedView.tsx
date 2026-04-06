@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Clock, Bell } from "lucide-react";
 import type { SnoozedMessage, Message } from "@/lib/api";
-import { listSnoozed, unsnoozeMessage, getMessage } from "@/lib/api";
+import { listSnoozed, unsnoozeMessage, getMessagesBatch } from "@/lib/api";
 import { useMailStore } from "@/stores/mail.store";
 import { useUIStore } from "@/stores/ui.store";
 import { useToastStore } from "@/stores/toast.store";
@@ -25,16 +25,13 @@ export default function SnoozedView() {
     setLoading(true);
     try {
       const snoozed = await listSnoozed();
-      const withMessages = await Promise.all(
-        snoozed.map(async (s) => {
-          try {
-            const message = await getMessage(s.message_id);
-            return { snooze: s, message };
-          } catch {
-            return { snooze: s, message: null };
-          }
-        }),
-      );
+      const ids = snoozed.map((s) => s.message_id);
+      const messages = ids.length > 0 ? await getMessagesBatch(ids) : [];
+      const messageMap = new Map(messages.map((m) => [m.id, m]));
+      const withMessages = snoozed.map((s) => ({
+        snooze: s,
+        message: messageMap.get(s.message_id) ?? null,
+      }));
       setEntries(withMessages);
     } finally {
       setLoading(false);

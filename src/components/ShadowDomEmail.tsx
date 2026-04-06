@@ -1,31 +1,9 @@
 import { useRef, useEffect } from "react";
-import DOMPurify from "dompurify";
+import { sanitizeHtml } from "@/lib/sanitizeHtml";
 
 interface ShadowDomEmailProps {
   html: string;
   className?: string;
-}
-
-/** Sanitize HTML to prevent XSS while preserving email formatting */
-function sanitizeHtml(html: string): string {
-  return DOMPurify.sanitize(html, {
-    ALLOWED_TAGS: [
-      "a", "abbr", "address", "article", "b", "bdi", "bdo", "blockquote",
-      "br", "caption", "cite", "code", "col", "colgroup", "dd", "del",
-      "details", "dfn", "div", "dl", "dt", "em", "figcaption", "figure",
-      "footer", "h1", "h2", "h3", "h4", "h5", "h6", "header", "hr", "i",
-      "img", "ins", "kbd", "li", "main", "mark", "nav", "ol", "p", "pre",
-      "q", "rp", "rt", "ruby", "s", "samp", "section", "small", "span",
-      "strong", "sub", "summary", "sup", "table", "tbody", "td", "tfoot",
-      "th", "thead", "time", "tr", "u", "ul", "var", "wbr", "center", "font",
-    ],
-    ALLOWED_ATTR: [
-      "href", "src", "alt", "title", "width", "height", "style", "class",
-      "dir", "id", "colspan", "rowspan", "border", "cellpadding", "cellspacing",
-      "align", "valign", "bgcolor", "color", "face", "size",
-    ],
-    ALLOW_DATA_ATTR: false,
-  });
 }
 
 export function ShadowDomEmail({ html, className }: ShadowDomEmailProps) {

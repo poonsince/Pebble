@@ -3,20 +3,24 @@ import type { SearchHit, Message } from "@/lib/api";
 
 interface Props {
   hit: SearchHit;
-  message: Message | null;
+  message?: Message | null;
   isSelected: boolean;
   onClick: () => void;
 }
 
 export default function SearchResultItem({ hit, message, isSelected, onClick }: Props) {
   const { t } = useTranslation();
-  const subject = message?.subject || hit.snippet || t("common.noSubject");
-  const from = message?.from_address || "";
-  const date = message ? new Date(message.date * 1000).toLocaleDateString() : "";
+  const subject = hit.subject || message?.subject || hit.snippet || t("common.noSubject");
+  const from = hit.from_address || message?.from_address || "";
+  const date = (hit.date || message?.date) ? new Date((hit.date || message!.date) * 1000).toLocaleDateString() : "";
 
   return (
     <div
+      role="option"
+      aria-selected={isSelected}
+      tabIndex={0}
       onClick={onClick}
+      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onClick(); } }}
       style={{
         padding: "10px 14px",
         cursor: "pointer",

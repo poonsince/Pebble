@@ -18,7 +18,15 @@ export default function TranslatePopover({ text, position, onClose }: Props) {
   const uiLang = localStorage.getItem("pebble-language") || "zh";
   const [targetLang, setTargetLang] = useState(uiLang === "en" ? "zh" : "en");
 
+  const [privacyAcked, setPrivacyAcked] = useState(() =>
+    localStorage.getItem("pebble-translate-privacy-ack") === "1",
+  );
+
   useEffect(() => {
+    if (!privacyAcked) {
+      setLoading(false);
+      return;
+    }
     let cancelled = false;
     setLoading(true);
     setError("");
@@ -33,7 +41,12 @@ export default function TranslatePopover({ text, position, onClose }: Props) {
         if (!cancelled) setLoading(false);
       });
     return () => { cancelled = true; };
-  }, [text, targetLang]);
+  }, [text, targetLang, privacyAcked]);
+
+  function handleAcceptPrivacy() {
+    localStorage.setItem("pebble-translate-privacy-ack", "1");
+    setPrivacyAcked(true);
+  }
 
   function handleCopy() {
     navigator.clipboard.writeText(translated);
@@ -99,8 +112,32 @@ export default function TranslatePopover({ text, position, onClose }: Props) {
         </button>
       </div>
 
-      {/* Content */}
-      {loading ? (
+      {/* Privacy notice for first-time use */}
+      {!privacyAcked ? (
+        <div style={{ fontSize: "13px", lineHeight: 1.5, padding: "8px 0" }}>
+          <p style={{ margin: "0 0 8px", color: "var(--color-warning, #e67e22)" }}>
+            {t(
+              "translate.privacyNotice",
+              "Translation will send the selected text to a third-party translation service. Your email content will leave this device.",
+            )}
+          </p>
+          <button
+            onClick={handleAcceptPrivacy}
+            style={{
+              padding: "6px 14px",
+              border: "1px solid var(--color-border)",
+              borderRadius: "4px",
+              backgroundColor: "var(--color-accent, #3b82f6)",
+              color: "#fff",
+              fontSize: "12px",
+              cursor: "pointer",
+            }}
+          >
+            {t("translate.acceptAndContinue", "I understand, continue")}
+          </button>
+        </div>
+      ) : /* Content */
+      loading ? (
         <div style={{ fontSize: "13px", color: "var(--color-text-secondary)", padding: "8px 0" }}>
           {t("common.translating")}
         </div>

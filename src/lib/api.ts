@@ -74,6 +74,9 @@ export interface SearchHit {
   message_id: string;
   score: number;
   snippet: string;
+  subject?: string;
+  from_address?: string;
+  date?: number;
 }
 
 export type PrivacyMode = "Strict" | { TrustSender: string } | "LoadOnce" | "Off";
@@ -108,10 +111,6 @@ export async function healthCheck(): Promise<string> {
   return invoke<string>("health_check");
 }
 
-export async function startOAuthFlow(provider: string): Promise<string> {
-  return invoke<string>("start_oauth_flow", { provider });
-}
-
 export async function completeOAuthFlow(
   provider: string,
   email: string,
@@ -134,9 +133,11 @@ export async function testImapConnection(
   imapSecurity: ConnectionSecurity,
   proxyHost?: string,
   proxyPort?: number,
+  username?: string,
+  password?: string,
 ): Promise<string> {
   return invoke<string>("test_imap_connection", {
-    request: { imap_host: imapHost, imap_port: imapPort, imap_security: imapSecurity, proxy_host: proxyHost, proxy_port: proxyPort },
+    request: { imap_host: imapHost, imap_port: imapPort, imap_security: imapSecurity, proxy_host: proxyHost, proxy_port: proxyPort, username, password },
   });
 }
 
