@@ -46,7 +46,7 @@ async fn fetch_userinfo(provider: &str, access_token: &str) -> Result<(String, S
         .unwrap_or("")
         .to_string();
 
-    debug!(email = %email, name = %name, "Fetched userinfo from OAuth provider");
+    debug!("Fetched userinfo from OAuth provider");
     Ok((email, name))
 }
 
@@ -56,11 +56,7 @@ pub(crate) fn gmail_oauth_config() -> OAuthConfig {
         client_id: option_env!("GOOGLE_CLIENT_ID")
             .unwrap_or("GOOGLE_CLIENT_ID_PLACEHOLDER")
             .to_string(),
-        client_secret: Some(
-            option_env!("GOOGLE_CLIENT_SECRET")
-                .unwrap_or("GOOGLE_CLIENT_SECRET_PLACEHOLDER")
-                .to_string(),
-        ),
+        client_secret: None,
         auth_url: "https://accounts.google.com/o/oauth2/v2/auth".to_string(),
         token_url: "https://oauth2.googleapis.com/token".to_string(),
         scopes: vec![
@@ -167,29 +163,6 @@ pub(crate) async fn ensure_account_oauth_tokens(
     }
 
     Ok(tokens)
-}
-
-/// Start the OAuth flow for a provider.
-///
-/// Returns the authorization URL that the frontend should open in the system
-/// browser via `shell.open()`.
-#[tauri::command]
-pub async fn start_oauth_flow(
-    provider: String,
-) -> std::result::Result<String, PebbleError> {
-    let config = config_for_provider(&provider)?;
-    let manager = OAuthManager::new(config);
-
-    let (auth_url, _pkce_state) = manager
-        .start_auth()
-        .await
-        .map_err(|e| PebbleError::OAuth(format!("Failed to start OAuth flow: {e}")))?;
-
-    // TODO: Store pkce_state for later use in complete_oauth. For now we use the
-    // combined flow in complete_oauth_flow which starts its own auth + redirect
-    // listener.
-
-    Ok(auth_url)
 }
 
 /// Complete the OAuth flow end-to-end.

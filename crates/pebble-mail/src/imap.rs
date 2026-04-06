@@ -596,6 +596,27 @@ impl ImapProvider {
         Ok(report)
     }
 
+    /// Test connection with login. Extends `test_connection` by also attempting LOGIN.
+    pub async fn test_connection_with_login(config: &ImapConfig) -> Result<String> {
+        // First do the basic connectivity test
+        let mut report = Self::test_connection(config).await?;
+
+        // Now try an actual IMAP login
+        report.push_str("\n--- Login test ---\n");
+        let provider = ImapProvider::new(config.clone());
+        match provider.connect().await {
+            Ok(()) => {
+                report.push_str("LOGIN: OK\n");
+                report.push_str("Authentication test: PASSED");
+            }
+            Err(e) => {
+                report.push_str(&format!("LOGIN: FAILED — {e}\n"));
+                return Err(PebbleError::Auth(format!("Authentication failed: {e}")));
+            }
+        }
+        Ok(report)
+    }
+
     /// List folders for the given account, returning `Folder` structs.
     pub async fn list_folders(&self, account_id: &str) -> Result<Vec<Folder>> {
         let mut guard = self.session.lock().await;

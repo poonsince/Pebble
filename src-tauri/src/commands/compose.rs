@@ -2,7 +2,7 @@ use crate::state::AppState;
 use crate::commands::oauth::ensure_account_oauth_tokens;
 use pebble_core::traits::{MailTransport, OutgoingMessage};
 use pebble_core::{EmailAddress, PebbleError, ProviderType};
-use pebble_mail::GmailProvider;
+use pebble_mail::{GmailProvider, OutlookProvider};
 use pebble_mail::smtp::SmtpSender;
 use tauri::State;
 
@@ -35,9 +35,13 @@ pub async fn send_email(
         .get_account(&account_id)?
         .ok_or_else(|| PebbleError::Internal(format!("Account not found: {account_id}")))?;
 
-    if matches!(account.provider, ProviderType::Gmail) {
-        let tokens = ensure_account_oauth_tokens(&state, &account_id, "gmail").await?;
-        let provider = GmailProvider::new(tokens.access_token);
+    if matches!(account.provider, ProviderType::Gmail | ProviderType::Outlook) {
+        let provider_name = match account.provider {
+            ProviderType::Gmail => "gmail",
+            ProviderType::Outlook => "outlook",
+            _ => unreachable!(),
+        };
+        let tokens = ensure_account_oauth_tokens(&state, &account_id, provider_name).await?;
         let message = OutgoingMessage {
             to: parse_recipients(to),
             cc: parse_recipients(cc),
@@ -47,7 +51,17 @@ pub async fn send_email(
             body_html,
             in_reply_to,
         };
-        return provider.send_message(&message).await;
+        return match account.provider {
+            ProviderType::Gmail => {
+                let provider = GmailProvider::new(tokens.access_token);
+                provider.send_message(&message).await
+            }
+            ProviderType::Outlook => {
+                let provider = OutlookProvider::new(tokens.access_token, account_id);
+                provider.send_message(&message).await
+            }
+            _ => unreachable!(),
+        };
     }
 
     // Read SMTP config from encrypted auth_data (where add_account stores it)

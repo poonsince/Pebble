@@ -1,7 +1,7 @@
 use crate::events;
 use crate::state::{AppState, SyncHandle};
 use pebble_core::{PebbleError, ProviderType};
-use pebble_mail::{GmailProvider, GmailSyncWorker, ImapConfig, ImapMailProvider, SyncConfig, SyncWorker};
+use pebble_mail::{GmailProvider, GmailSyncWorker, ImapConfig, ImapMailProvider, OutlookProvider, SyncConfig, SyncWorker};
 use pebble_rules::RuleEngine;
 use pebble_search::TantivySearch;
 use pebble_store::Store;
@@ -34,9 +34,9 @@ pub async fn resume_all_syncs(app: tauri::AppHandle) {
     };
 
     for account in accounts {
-        info!("Auto-resuming sync for account {} ({})", account.id, account.email);
+        info!("Auto-resuming sync for account {}", account.id);
         if let Err(e) = start_sync_inner(&app, &state, account.id.clone(), None).await {
-            warn!("Failed to auto-resume sync for {}: {e}", account.email);
+            warn!("Failed to auto-resume sync for account {}: {e}", account.id);
         }
     }
 }
@@ -123,10 +123,7 @@ async fn start_sync_inner(
                         let config = OAuthConfig {
                             client_id: option_env!("GOOGLE_CLIENT_ID")
                                 .unwrap_or("GOOGLE_CLIENT_ID_PLACEHOLDER").into(),
-                            client_secret: Some(
-                                option_env!("GOOGLE_CLIENT_SECRET")
-                                    .unwrap_or("GOOGLE_CLIENT_SECRET_PLACEHOLDER").into(),
-                            ),
+                            client_secret: None,
                             auth_url: "https://accounts.google.com/o/oauth2/v2/auth".into(),
                             token_url: "https://oauth2.googleapis.com/token".into(),
                             scopes: vec!["https://mail.google.com/".into()],
@@ -191,8 +188,181 @@ async fn start_sync_inner(
                 info!("Gmail sync task completed for account {}", account_id_clone);
             })
         }
-        ProviderType::Imap | ProviderType::Outlook => {
-            // --- IMAP path (also used for Outlook IMAP for now) ---
+        ProviderType::Outlook => {
+            // --- Outlook: Graph API over HTTPS ---
+            let encrypted = state
+                .store
+                .get_auth_data(&account_id)?
+                .ok_or_else(|| PebbleError::Internal("No auth data for Outlook account".into()))?;
+            let decrypted = state.crypto.decrypt(&encrypted)?;
+            let token_data: serde_json::Value = serde_json::from_slice(&decrypted)
+                .map_err(|e| PebbleError::Internal(format!("Failed to parse token data: {e}")))?;
+            let access_token = token_data["access_token"]
+                .as_str()
+                .unwrap_or("")
+                .to_string();
+            let refresh_token = token_data["refresh_token"]
+                .as_str()
+                .map(|s| s.to_string());
+            let expires_at = token_data["expires_at"].as_i64();
+
+            let provider = Arc::new(OutlookProvider::new(access_token, account_id.clone()));
+
+            // Build token refresher closure for Outlook
+            let crypto = Arc::clone(&state.crypto);
+            let store_for_refresh = Arc::clone(&state.store);
+            let acct_id_for_refresh = account_id.clone();
+            let provider_for_task = Arc::clone(&provider);
+
+            let refresher: Option<pebble_mail::gmail_sync::TokenRefresher> = refresh_token.map(|rt| {
+                let refresher: pebble_mail::gmail_sync::TokenRefresher = Box::new(move || {
+                    let rt = rt.clone();
+                    let crypto = Arc::clone(&crypto);
+                    let store = Arc::clone(&store_for_refresh);
+                    let acct_id = acct_id_for_refresh.clone();
+                    Box::pin(async move {
+                        use pebble_oauth::{OAuthConfig, OAuthManager};
+                        let config = OAuthConfig {
+                            client_id: std::env::var("MICROSOFT_CLIENT_ID")
+                                .unwrap_or_else(|_| "MICROSOFT_CLIENT_ID_PLACEHOLDER".into()),
+                            client_secret: std::env::var("MICROSOFT_CLIENT_SECRET").ok(),
+                            auth_url: "https://login.microsoftonline.com/common/oauth2/v2.0/authorize".into(),
+                            token_url: "https://login.microsoftonline.com/common/oauth2/v2.0/token".into(),
+                            scopes: vec![
+                                "https://graph.microsoft.com/Mail.ReadWrite".into(),
+                                "https://graph.microsoft.com/Mail.Send".into(),
+                                "offline_access".into(),
+                            ],
+                            redirect_port: 8757,
+                        };
+                        let manager = OAuthManager::new(config);
+                        let token_pair = manager
+                            .refresh_token(&rt)
+                            .await
+                            .map_err(|e| PebbleError::OAuth(format!("Outlook token refresh failed: {e}")))?;
+
+                        let tokens_json = serde_json::json!({
+                            "access_token": token_pair.access_token,
+                            "refresh_token": token_pair.refresh_token,
+                            "expires_at": token_pair.expires_at,
+                            "scopes": token_pair.scopes,
+                        });
+                        let config_bytes = serde_json::to_vec(&tokens_json)
+                            .map_err(|e| PebbleError::Internal(format!("Serialize tokens: {e}")))?;
+                        let encrypted = crypto.encrypt(&config_bytes)?;
+                        store.set_auth_data(&acct_id, &encrypted)?;
+
+                        Ok(token_pair.access_token)
+                    })
+                });
+                refresher
+            });
+
+            tokio::spawn(async move {
+                use pebble_core::traits::{FetchQuery, FolderProvider, MailTransport};
+                let mut stop_rx = stop_rx;
+
+                let _ = app_for_progress.emit(
+                    events::MAIL_SYNC_PROGRESS,
+                    serde_json::json!({ "account_id": &account_id_for_progress, "status": "started" }),
+                );
+
+                let poll_interval = poll_interval_secs.unwrap_or(300);
+
+                loop {
+                    if *stop_rx.borrow() {
+                        break;
+                    }
+
+                    // Refresh token if needed
+                    if let Some(ref refresher_fn) = refresher {
+                        let should_refresh = expires_at
+                            .map(|exp| pebble_core::now_timestamp() >= exp - 60)
+                            .unwrap_or(false);
+                        if should_refresh {
+                            match refresher_fn().await {
+                                Ok(new_token) => {
+                                    provider_for_task.set_access_token(new_token);
+                                }
+                                Err(e) => {
+                                    let _ = error_tx.send(pebble_mail::SyncError {
+                                        error_type: "token_refresh".into(),
+                                        message: format!("Outlook token refresh failed: {e}"),
+                                        timestamp: pebble_core::now_timestamp() as u64,
+                                    });
+                                }
+                            }
+                        }
+                    }
+
+                    // List folders and fetch messages per folder
+                    let folders = match provider_for_task.list_folders().await {
+                        Ok(f) => f,
+                        Err(e) => {
+                            warn!("Outlook folder list failed: {e}");
+                            let _ = error_tx.send(pebble_mail::SyncError {
+                                error_type: "sync".into(),
+                                message: format!("Outlook folder list failed: {e}"),
+                                timestamp: pebble_core::now_timestamp() as u64,
+                            });
+                            vec![]
+                        }
+                    };
+
+                    for folder in &folders {
+                        // Persist folder
+                        let _ = store.insert_folder(&folder);
+
+                        let query = FetchQuery {
+                            folder_id: folder.remote_id.clone(),
+                            limit: Some(50),
+                        };
+                        match provider_for_task.fetch_messages(&query).await {
+                            Ok(result) => {
+                                for msg in &result.messages {
+                                    let folder_ids = vec![folder.id.clone()];
+                                    if let Err(e) = store.insert_message(msg, &folder_ids) {
+                                        warn!("Failed to store Outlook message: {e}");
+                                    } else {
+                                        let _ = message_tx.send(pebble_mail::StoredMessage {
+                                            message: msg.clone(),
+                                            folder_ids,
+                                        });
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                warn!("Outlook sync fetch failed for folder {}: {e}", folder.name);
+                            }
+                        }
+
+                        if *stop_rx.borrow() {
+                            break;
+                        }
+                    }
+
+                    // Emit progress
+                    let _ = app_for_progress.emit(
+                        events::MAIL_SYNC_PROGRESS,
+                        serde_json::json!({ "account_id": &account_id_for_progress, "status": "synced" }),
+                    );
+
+                    // Wait for next poll or stop signal
+                    let _ = tokio::time::timeout(
+                        std::time::Duration::from_secs(poll_interval),
+                        stop_rx.changed(),
+                    ).await;
+                }
+
+                let _ = app_for_progress.emit(
+                    events::MAIL_SYNC_COMPLETE,
+                    serde_json::json!({ "account_id": &account_id_for_progress }),
+                );
+                info!("Outlook sync task completed for account {}", account_id_clone);
+            })
+        }
+        ProviderType::Imap => {
+            // --- IMAP path ---
             let imap_config: ImapConfig = if let Some(encrypted) = state.store.get_auth_data(&account_id)? {
                 let decrypted = state.crypto.decrypt(&encrypted)?;
                 let value: serde_json::Value = serde_json::from_slice(&decrypted)

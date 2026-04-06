@@ -42,7 +42,7 @@ pub async fn add_account(
         id: new_id(),
         email: request.email.clone(),
         display_name: request.display_name.clone(),
-        provider,
+        provider: provider.clone(),
         created_at: now,
         updated_at: now,
     };
@@ -80,7 +80,12 @@ pub async fn add_account(
     state.store.set_auth_data(&account.id, &encrypted)?;
 
     // Store non-secret metadata in sync_state
-    let metadata = serde_json::json!({ "provider": "imap" });
+    let provider_slug = match provider {
+        ProviderType::Gmail => "gmail",
+        ProviderType::Outlook => "outlook",
+        ProviderType::Imap => "imap",
+    };
+    let metadata = serde_json::json!({ "provider": provider_slug });
     let metadata_json = serde_json::to_string(&metadata)
         .map_err(|e| PebbleError::Internal(format!("Failed to serialize metadata: {e}")))?;
     state
@@ -180,6 +185,10 @@ pub struct TestConnectionRequest {
     pub proxy_host: Option<String>,
     #[serde(default)]
     pub proxy_port: Option<u16>,
+    #[serde(default)]
+    pub username: Option<String>,
+    #[serde(default)]
+    pub password: Option<String>,
 }
 
 #[tauri::command]
@@ -190,15 +199,21 @@ pub async fn test_imap_connection(
         (Some(h), Some(p)) if !h.is_empty() => Some(pebble_mail::ProxyConfig { host: h, port: p }),
         _ => None,
     };
+    let has_credentials = request.username.as_ref().is_some_and(|u| !u.is_empty())
+        && request.password.as_ref().is_some_and(|p| !p.is_empty());
     let config = pebble_mail::ImapConfig {
         host: request.imap_host,
         port: request.imap_port,
-        username: String::new(),
-        password: String::new(),
+        username: request.username.unwrap_or_default(),
+        password: request.password.unwrap_or_default(),
         security: request.imap_security,
         proxy,
     };
-    pebble_mail::ImapProvider::test_connection(&config).await
+    if has_credentials {
+        pebble_mail::ImapProvider::test_connection_with_login(&config).await
+    } else {
+        pebble_mail::ImapProvider::test_connection(&config).await
+    }
 }
 
 #[tauri::command]

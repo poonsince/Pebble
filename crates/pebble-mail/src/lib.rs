@@ -12,4 +12,5 @@ pub use gmail_sync::GmailSyncWorker;
 pub use imap::{ConnectionSecurity, ImapConfig, ImapProvider, ProxyConfig, SmtpConfig};
 pub use provider::gmail::GmailProvider;
 pub use provider::imap_provider::ImapMailProvider;
+pub use provider::outlook::OutlookProvider;
 pub use sync::{StoredMessage, SyncConfig, SyncError, SyncWorker};

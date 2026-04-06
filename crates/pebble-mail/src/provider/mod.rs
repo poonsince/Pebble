@@ -11,6 +11,7 @@ use pebble_core::traits::MailProvider;
 pub async fn create_provider(
     provider_type: &ProviderType,
     credentials: &serde_json::Value,
+    account_id: &str,
 ) -> Result<Arc<dyn MailProvider>> {
     match provider_type {
         ProviderType::Imap => {
@@ -39,7 +40,7 @@ pub async fn create_provider(
                     PebbleError::Auth("Missing access_token for Outlook".to_string())
                 })?
                 .to_string();
-            let provider = outlook::OutlookProvider::new(token);
+            let provider = outlook::OutlookProvider::new(token, account_id.to_string());
             Ok(Arc::new(provider))
         }
     }

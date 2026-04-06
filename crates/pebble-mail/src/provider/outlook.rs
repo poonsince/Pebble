@@ -190,13 +190,15 @@ struct GraphDraftResponse {
 pub struct OutlookProvider {
     client: Client,
     access_token: RwLock<String>,
+    account_id: String,
 }
 
 impl OutlookProvider {
-    pub fn new(access_token: String) -> Self {
+    pub fn new(access_token: String, account_id: String) -> Self {
         Self {
             client: Client::new(),
             access_token: RwLock::new(access_token),
+            account_id,
         }
     }
 
@@ -385,7 +387,7 @@ impl MailTransport for OutlookProvider {
         let messages: Vec<Message> = list
             .value
             .iter()
-            .map(|gm| Self::graph_message_to_message(gm, ""))
+            .map(|gm| Self::graph_message_to_message(gm, &self.account_id))
             .collect();
 
         let cursor_value = list.next_link.unwrap_or_default();
@@ -460,7 +462,7 @@ impl MailTransport for OutlookProvider {
         let new_messages: Vec<Message> = list
             .value
             .iter()
-            .map(|gm| Self::graph_message_to_message(gm, ""))
+            .map(|gm| Self::graph_message_to_message(gm, &self.account_id))
             .collect();
 
         let cursor = list
