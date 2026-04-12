@@ -1,5 +1,7 @@
 pub mod accounts;
 pub mod advanced_search;
+pub mod drafts;
+pub mod folder_counts;
 pub mod attachments;
 pub mod batch;
 pub mod cloud_sync;

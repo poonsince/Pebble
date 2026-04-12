@@ -200,6 +200,9 @@ pub fn run() {
             commands::advanced_search::advanced_search,
             commands::sync_cmd::reindex_search,
             commands::notifications::set_notifications_enabled,
+            commands::drafts::save_draft,
+            commands::drafts::delete_draft,
+            commands::folder_counts::get_folder_unread_counts,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

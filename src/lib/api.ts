@@ -413,3 +413,39 @@ export async function searchContacts(
 ): Promise<KnownContact[]> {
   return invoke<KnownContact[]>("search_contacts", { accountId, query, limit });
 }
+
+// ─── Drafts API ──────────────────────────────────────────────────────────────
+
+export async function saveDraft(args: {
+  accountId: string;
+  to: string[];
+  cc: string[];
+  bcc: string[];
+  subject: string;
+  bodyText: string;
+  bodyHtml?: string;
+  inReplyTo?: string;
+  existingDraftId?: string;
+}): Promise<string> {
+  return invoke("save_draft", {
+    accountId: args.accountId,
+    to: args.to,
+    cc: args.cc,
+    bcc: args.bcc,
+    subject: args.subject,
+    bodyText: args.bodyText,
+    bodyHtml: args.bodyHtml ?? null,
+    inReplyTo: args.inReplyTo ?? null,
+    existingDraftId: args.existingDraftId ?? null,
+  });
+}
+
+export async function deleteDraft(accountId: string, draftId: string): Promise<void> {
+  return invoke("delete_draft", { accountId, draftId });
+}
+
+// ─── Folder Counts API ───────────────────────────────────────────────────────
+
+export async function getFolderUnreadCounts(accountId: string): Promise<Record<string, number>> {
+  return invoke("get_folder_unread_counts", { accountId });
+}

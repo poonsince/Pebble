@@ -1,6 +1,8 @@
 import { useEffect, useRef, useCallback } from "react";
 import { useUIStore } from "@/stores/ui.store";
+import { useMailStore } from "@/stores/mail.store";
 import { hasComposeDraft } from "@/features/compose/compose-draft";
+import { saveDraft } from "@/lib/api";
 
 import type { EditorMode } from "./useComposeEditor";
 
@@ -69,6 +71,11 @@ export function useComposeDraft({
     [],
   );
 
+  // Ref to track the server-side draft ID across saves
+  const draftIdRef = useRef<string | null>(null);
+
+  const activeAccountId = useMailStore((s) => s.activeAccountId);
+
   // Track dirty state for leave-protection
   useEffect(() => {
     const init = initialSnapshot.current!;
@@ -82,15 +89,31 @@ export function useComposeDraft({
     useUIStore.getState().setComposeDirty(userChanged);
   }, [arraysEqual, bcc, cc, rawSource, richTextHtml, subject, to]);
 
-  // Auto-save draft to localStorage (debounced 1s)
+  // Auto-save draft to localStorage and backend (debounced 3s)
   useEffect(() => {
     if (!composeMode || composeMode !== "new") return;
     const timer = setTimeout(() => {
       const hasDraft = to.length > 0 || cc.length > 0 || bcc.length > 0 || subject.trim() || rawSource.trim() || richTextHtml.trim();
       if (hasDraft) {
         saveDraftToStorage({ to, cc, bcc, subject, rawSource, richTextHtml, editorMode });
+        // Also save to backend
+        if (activeAccountId) {
+          saveDraft({
+            accountId: activeAccountId,
+            to, cc, bcc, subject,
+            bodyText: rawSource,
+            bodyHtml: richTextHtml || undefined,
+            existingDraftId: draftIdRef.current || undefined,
+          }).then((id) => {
+            draftIdRef.current = id;
+          }).catch((err) => {
+            console.warn("Backend draft save failed:", err);
+          });
+        }
       }
-    }, 1000);
+    }, 3000);
     return () => clearTimeout(timer);
-  }, [to, cc, bcc, subject, rawSource, richTextHtml, editorMode, composeMode]);
+  }, [to, cc, bcc, subject, rawSource, richTextHtml, editorMode, composeMode, activeAccountId]);
+
+  return { draftIdRef };
 }
