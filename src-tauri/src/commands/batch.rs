@@ -3,39 +3,31 @@ use super::messages::{refresh_search_document, find_folder_by_role, find_message
 use super::messages::provider_dispatch::{ConnectedProvider, parse_imap_uid};
 use pebble_core::traits::{FolderProvider, LabelProvider};
 use pebble_core::{FolderRole, Message, PebbleError, ProviderType};
+use pebble_store::Store;
 use std::collections::HashMap;
 use tauri::State;
 use tracing::{info, warn};
 
 /// Group messages by account_id and resolve their provider type.
+/// Uses a batch query to avoid N+1 individual lookups.
 fn group_by_account(
-    state: &AppState,
+    store: &Store,
     message_ids: &[String],
-) -> HashMap<String, (ProviderType, Vec<Message>)> {
+) -> std::result::Result<HashMap<String, (ProviderType, Vec<Message>)>, PebbleError> {
+    let messages = store.get_messages_batch(message_ids)?;
     let mut groups: HashMap<String, (ProviderType, Vec<Message>)> = HashMap::new();
-
-    for message_id in message_ids {
-        let msg = match state.store.get_message(message_id) {
-            Ok(Some(m)) => m,
-            _ => continue,
-        };
-        let account_id = msg.account_id.clone();
+    for msg in messages {
+        let provider = store
+            .get_account(&msg.account_id)?
+            .map(|a| a.provider)
+            .unwrap_or(ProviderType::Imap);
         groups
-            .entry(account_id.clone())
-            .or_insert_with(|| {
-                let provider = state
-                    .store
-                    .get_account(&account_id)
-                    .ok()
-                    .flatten()
-                    .map(|a| a.provider)
-                    .unwrap_or(ProviderType::Imap);
-                (provider, Vec::new())
-            })
+            .entry(msg.account_id.clone())
+            .or_insert_with(|| (provider, Vec::new()))
             .1
             .push(msg);
     }
-    groups
+    Ok(groups)
 }
 
 #[tauri::command]
@@ -47,7 +39,13 @@ pub async fn batch_archive(
         return Ok(0);
     }
 
-    let groups = group_by_account(&state, &message_ids);
+    let store = state.store.clone();
+    let ids = message_ids.clone();
+    let groups = tokio::task::spawn_blocking(move || {
+        group_by_account(&store, &ids)
+    })
+    .await
+    .map_err(|e| PebbleError::Internal(format!("Task join error: {e}")))??;
     let mut success_count: u32 = 0;
     let mut archived_ids = Vec::new();
 
@@ -73,7 +71,9 @@ pub async fn batch_archive(
                         }
                     }
                     ConnectedProvider::Outlook(provider) => {
-                        let af = archive_folder.as_ref().unwrap();
+                        let Some(af) = archive_folder.as_ref() else {
+                            continue;
+                        };
                         for msg in messages {
                             if let Err(e) = provider.move_message(&msg.remote_id, &af.remote_id).await {
                                 warn!("Outlook batch archive failed for {}: {e}", msg.id);
@@ -81,7 +81,9 @@ pub async fn batch_archive(
                         }
                     }
                     ConnectedProvider::Imap(imap) => {
-                        let af = archive_folder.as_ref().unwrap();
+                        let Some(af) = archive_folder.as_ref() else {
+                            continue;
+                        };
                         for msg in messages {
                             if let Ok(uid) = parse_imap_uid(&msg.remote_id) {
                                 if let Ok(src) = find_message_folder(&state, &msg.id, account_id) {
@@ -137,7 +139,13 @@ pub async fn batch_delete(
         return Ok(0);
     }
 
-    let groups = group_by_account(&state, &message_ids);
+    let store = state.store.clone();
+    let ids = message_ids.clone();
+    let groups = tokio::task::spawn_blocking(move || {
+        group_by_account(&store, &ids)
+    })
+    .await
+    .map_err(|e| PebbleError::Internal(format!("Task join error: {e}")))??;
 
     // Remote sync — connect once per account, operate, disconnect
     for (account_id, (provider_type, messages)) in &groups {
@@ -209,7 +217,13 @@ pub async fn batch_mark_read(
         return Ok(0);
     }
 
-    let groups = group_by_account(&state, &message_ids);
+    let store = state.store.clone();
+    let ids = message_ids.clone();
+    let groups = tokio::task::spawn_blocking(move || {
+        group_by_account(&store, &ids)
+    })
+    .await
+    .map_err(|e| PebbleError::Internal(format!("Task join error: {e}")))??;
 
     // Remote sync — connect once per account, operate, disconnect
     for (account_id, (provider_type, messages)) in &groups {
