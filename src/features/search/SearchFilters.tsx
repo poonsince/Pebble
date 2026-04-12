@@ -3,6 +3,10 @@ import { useTranslation } from "react-i18next";
 import type { AdvancedSearchQuery, Folder } from "@/lib/api";
 import { listAccounts, listFolders } from "@/lib/api";
 
+interface FolderWithAccount extends Folder {
+  accountEmail: string;
+}
+
 interface Props {
   filters: AdvancedSearchQuery;
   onChange: (filters: AdvancedSearchQuery) => void;
@@ -11,12 +15,17 @@ interface Props {
 
 export default function SearchFilters({ filters, onChange, onClear }: Props) {
   const { t } = useTranslation();
-  const [folders, setFolders] = useState<Folder[]>([]);
+  const [folders, setFolders] = useState<FolderWithAccount[]>([]);
 
   useEffect(() => {
     listAccounts().then((accounts) => {
+      const emailByAccountId = new Map(accounts.map((a) => [a.id, a.email]));
       Promise.all(accounts.map((a) => listFolders(a.id))).then((results) => {
-        setFolders(results.flat());
+        const all: FolderWithAccount[] = results.flat().map((f) => ({
+          ...f,
+          accountEmail: emailByAccountId.get(f.account_id) ?? "",
+        }));
+        setFolders(all);
       });
     });
   }, []);
@@ -105,7 +114,7 @@ export default function SearchFilters({ filters, onChange, onClear }: Props) {
             }
             onChange={(e) => {
               const val = e.target.value;
-              update({ dateFrom: val ? Math.floor(new Date(val).getTime() / 1000) : undefined });
+              update({ dateFrom: val ? Math.floor(new Date(val + "T00:00:00").getTime() / 1000) : undefined });
             }}
             style={inputStyle}
           />
@@ -158,7 +167,9 @@ export default function SearchFilters({ filters, onChange, onClear }: Props) {
           >
             <option value="">{t("search.allFolders")}</option>
             {folders.map((f) => (
-              <option key={f.id} value={f.id}>{f.name}</option>
+              <option key={f.id} value={f.id}>
+                {f.accountEmail ? `${f.accountEmail} / ${f.name}` : f.name}
+              </option>
             ))}
           </select>
         </div>
