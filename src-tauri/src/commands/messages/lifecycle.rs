@@ -261,6 +261,91 @@ pub async fn restore_message(
 }
 
 #[tauri::command]
+pub async fn move_to_folder(
+    state: State<'_, AppState>,
+    message_id: String,
+    target_folder_id: String,
+) -> std::result::Result<(), PebbleError> {
+    let msg = state.store.get_message(&message_id)?
+        .ok_or_else(|| PebbleError::Internal(format!("Message not found: {message_id}")))?;
+
+    let source_folder = find_message_folder(&state, &message_id, &msg.account_id)?;
+    if source_folder.id == target_folder_id {
+        return Ok(());
+    }
+
+    let provider_type = state
+        .store
+        .get_account(&msg.account_id)?
+        .map(|account| account.provider)
+        .ok_or_else(|| PebbleError::Internal(format!("Account not found: {}", msg.account_id)))?;
+
+    // Look up target folder to get its remote_id
+    let target_folders = state.store.list_folders(&msg.account_id)?;
+    let target_folder = target_folders.iter()
+        .find(|f| f.id == target_folder_id)
+        .ok_or_else(|| PebbleError::Internal(format!("Target folder not found: {target_folder_id}")))?;
+
+    let is_local_target = target_folder.remote_id.starts_with("__local_");
+
+    // TODO(FC-5): add full remote-move support for Gmail label semantics
+    match provider_type {
+        ProviderType::Outlook => {
+            if !is_local_target {
+                match connect_outlook(&state, &msg.account_id).await {
+                    Ok(provider) => {
+                        if let Err(e) = provider.move_message(&msg.remote_id, &target_folder.remote_id).await {
+                            warn!("Outlook move_to_folder failed: {e}");
+                        } else {
+                            info!("Moved Outlook message {} to folder {}", message_id, target_folder.name);
+                        }
+                    }
+                    Err(e) => warn!("Outlook connect failed for move_to_folder: {e}"),
+                }
+            }
+        }
+        ProviderType::Imap => {
+            if !is_local_target {
+                if let Ok(uid) = msg.remote_id.parse::<u32>() {
+                    match connect_imap(&state, &msg.account_id).await {
+                        Ok(imap) => {
+                            let result = imap.move_message(&source_folder.remote_id, uid, &target_folder.remote_id).await;
+                            let _ = imap.disconnect().await;
+                            if let Err(e) = result {
+                                warn!("IMAP move_to_folder failed: {e}");
+                            } else {
+                                info!("Moved IMAP message {} (UID {}) to folder {}", message_id, uid, target_folder.name);
+                            }
+                        }
+                        Err(e) => warn!("IMAP connect failed for move_to_folder: {e}"),
+                    }
+                }
+            }
+        }
+        ProviderType::Gmail => {
+            // Gmail uses labels; moving to a non-inbox folder means removing INBOX label
+            if let Ok(provider) = connect_gmail(&state, &msg.account_id).await {
+                if target_folder.role == Some(pebble_core::FolderRole::Spam) {
+                    if let Err(e) = provider.modify_labels(&msg.remote_id, &["SPAM".to_string()], &["INBOX".to_string()]).await {
+                        warn!("Gmail mark as spam failed: {e}");
+                    }
+                } else if !is_local_target {
+                    // Generic move: strip INBOX, add target label
+                    if let Err(e) = provider.modify_labels(&msg.remote_id, &[target_folder.remote_id.clone()], &["INBOX".to_string()]).await {
+                        warn!("Gmail move_to_folder failed: {e}");
+                    }
+                }
+            }
+        }
+    }
+
+    state.store.move_message_to_folder(&message_id, &target_folder_id)?;
+    refresh_search_document(&state, &message_id)?;
+    info!("Moved message {} to folder {} ({})", message_id, target_folder.name, target_folder_id);
+    Ok(())
+}
+
+#[tauri::command]
 pub async fn empty_trash(
     state: State<'_, AppState>,
     account_id: String,

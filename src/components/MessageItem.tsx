@@ -1,9 +1,9 @@
 import { memo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
-import { Star, Paperclip, Archive, LayoutGrid } from "lucide-react";
+import { Star, Paperclip, Archive, LayoutGrid, ShieldAlert } from "lucide-react";
 import type { Label, MessageSummary } from "@/lib/api";
-import { updateMessageFlags, archiveMessage } from "@/lib/api";
+import { updateMessageFlags, archiveMessage, moveToFolder } from "@/lib/api";
 import { useKanbanStore } from "@/stores/kanban.store";
 import { useToastStore } from "@/stores/toast.store";
 
@@ -16,6 +16,7 @@ interface Props {
   batchMode?: boolean;
   batchSelected?: boolean;
   onToggleBatchSelect?: (messageId: string) => void;
+  spamFolderId?: string;
 }
 
 function formatDate(timestamp: number): string {
@@ -33,7 +34,7 @@ function formatDate(timestamp: number): string {
   return date.toLocaleDateString([], { month: "short", day: "numeric" });
 }
 
-function MessageItem({ message, labels = [], isSelected, onClick, onToggleStar, batchMode, batchSelected, onToggleBatchSelect }: Props) {
+function MessageItem({ message, labels = [], isSelected, onClick, onToggleStar, batchMode, batchSelected, onToggleBatchSelect, spamFolderId }: Props) {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
   const [showActions, setShowActions] = useState(false);
@@ -225,6 +226,37 @@ function MessageItem({ message, labels = [], isSelected, onClick, onToggleStar, 
           >
             <Archive size={14} />
           </button>
+          {spamFolderId && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                queryClient.setQueriesData<MessageSummary[]>({ queryKey: ["messages"] }, (old) => old?.filter((m) => m.id !== message.id));
+                moveToFolder(message.id, spamFolderId)
+                  .then(() => {
+                    queryClient.invalidateQueries({ queryKey: ["messages"] });
+                    queryClient.invalidateQueries({ queryKey: ["threads"] });
+                    useToastStore.getState().addToast({ message: t("messageActions.spamSuccess", "Marked as spam"), type: "success" });
+                  })
+                  .catch(() => {
+                    queryClient.invalidateQueries({ queryKey: ["messages"] });
+                    useToastStore.getState().addToast({ message: t("messageActions.spamFailed", "Failed to mark as spam"), type: "error" });
+                  });
+              }}
+              title={t("messageActions.reportSpam", "Report spam")}
+              style={{
+                padding: "4px",
+                border: "none",
+                background: "transparent",
+                borderRadius: "4px",
+                cursor: "pointer",
+                display: "flex",
+                alignItems: "center",
+                color: "var(--color-text-secondary)",
+              }}
+            >
+              <ShieldAlert size={14} />
+            </button>
+          )}
           <button
             onClick={(e) => {
               e.stopPropagation();
