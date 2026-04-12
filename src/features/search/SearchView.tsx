@@ -1,11 +1,11 @@
 import { useState, useCallback, useEffect, useRef } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useTranslation } from "react-i18next";
 import { Search, SlidersHorizontal, Loader } from "lucide-react";
 import type { AdvancedSearchQuery, SearchHit } from "@/lib/api";
 import { advancedSearch, searchMessages } from "@/lib/api";
 import { useUIStore } from "@/stores/ui.store";
-import { extractErrorMessage } from "@/lib/extractErrorMessage";
 import SearchFilters from "./SearchFilters";
 import SearchResultItem from "./SearchResultItem";
 import MessageDetail from "@/components/MessageDetail";
@@ -29,13 +29,26 @@ export default function SearchView() {
   const [query, setQuery] = useState("");
   const [filters, setFilters] = useState<AdvancedSearchQuery>(emptyFilters);
   const [showFilters, setShowFilters] = useState(false);
-  const [results, setResults] = useState<SearchHit[]>([]);
-  const [loading, setLoading] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [hasSearched, setHasSearched] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const initialQueryRef = useRef<string | null>(null);
-  const requestIdRef = useRef(0);
+
+  const trimmed = query.trim();
+  const filtersActive = hasActiveFilters(filters);
+  const searchEnabled = hasSearched && (trimmed.length > 0 || filtersActive);
+
+  const { data: results = [], isLoading: loading, error: queryError, refetch } = useQuery({
+    queryKey: ["search", trimmed, filters],
+    queryFn: () => {
+      if (filtersActive) {
+        return advancedSearch({ ...filters, text: trimmed || undefined });
+      }
+      return searchMessages(trimmed);
+    },
+    enabled: searchEnabled,
+    staleTime: 60_000,
+    placeholderData: (prev: SearchHit[] | undefined) => prev,
+  });
 
   const resultsParentRef = useRef<HTMLDivElement>(null);
   const virtualizer = useVirtualizer({
@@ -46,43 +59,15 @@ export default function SearchView() {
     overscan: 5,
   });
 
-  const doSearch = useCallback(async () => {
-    const trimmed = query.trim();
-    const filtersActive = hasActiveFilters(filters);
-
-    if (!trimmed && !filtersActive) {
-      requestIdRef.current += 1; // invalidate any in-flight response
-      setResults([]);
+  const doSearch = useCallback(() => {
+    const t = query.trim();
+    if (!t && !hasActiveFilters(filters)) {
       setHasSearched(false);
-      setLoading(false);
+      setSelectedId(null);
       return;
     }
-
-    const myId = ++requestIdRef.current;
-    setLoading(true);
-    setError(null);
     setHasSearched(true);
-    try {
-      let hits: SearchHit[];
-      if (filtersActive) {
-        hits = await advancedSearch({ ...filters, text: trimmed || undefined });
-      } else {
-        hits = await searchMessages(trimmed);
-      }
-      // Ignore stale responses from superseded requests
-      if (myId !== requestIdRef.current) return;
-      setResults(hits);
-      setSelectedId(null);
-    } catch (err) {
-      if (myId === requestIdRef.current) {
-        setError(extractErrorMessage(err));
-        setResults([]);
-      }
-    } finally {
-      if (myId === requestIdRef.current) {
-        setLoading(false);
-      }
-    }
+    setSelectedId(null);
   }, [query, filters]);
 
   // Pick up query from store on every mount (works across navigations)
@@ -240,7 +225,7 @@ export default function SearchView() {
             </div>
           )}
 
-          {!loading && error && (
+          {!loading && queryError && (
             <div
               className="fade-in"
               style={{
@@ -257,9 +242,9 @@ export default function SearchView() {
               <p style={{ color: "var(--color-error, #e53e3e)", margin: 0 }}>
                 {t("search.error", "Search failed")}
               </p>
-              <p style={{ fontSize: "13px", margin: 0 }}>{error}</p>
+              <p style={{ fontSize: "13px", margin: 0 }}>{queryError?.message}</p>
               <button
-                onClick={doSearch}
+                onClick={() => refetch()}
                 style={{
                   marginTop: "8px",
                   padding: "6px 16px",
@@ -276,7 +261,7 @@ export default function SearchView() {
             </div>
           )}
 
-          {!loading && !error && hasSearched && results.length === 0 && (
+          {!loading && !queryError && hasSearched && results.length === 0 && (
             <div
               style={{
                 display: "flex",
