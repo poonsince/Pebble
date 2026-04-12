@@ -9,5 +9,6 @@ export function useMessageQuery(messageId: string | null) {
     queryKey: messageQueryKey(messageId ?? ""),
     queryFn: () => getMessage(messageId!),
     enabled: !!messageId,
+    staleTime: 5 * 60_000,
   });
 }

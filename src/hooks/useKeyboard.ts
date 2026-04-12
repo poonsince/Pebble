@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { useShortcutStore } from "@/stores/shortcut.store";
 import { useCommandStore } from "@/stores/command.store";
 import { useUIStore, isComposeDirty } from "@/stores/ui.store";
@@ -52,6 +52,29 @@ async function confirmLeaveCompose(): Promise<boolean> {
 }
 
 export function useKeyboard() {
+  // Reverse lookup: keyString (lowercase) -> actionId, rebuilt only when bindings change
+  const keyToActionRef = useRef<Map<string, string>>(new Map());
+
+  useEffect(() => {
+    const bindings = useShortcutStore.getState().bindings;
+    const map = new Map<string, string>();
+    for (const [actionId, keys] of Object.entries(bindings)) {
+      map.set(keys.toLowerCase(), actionId);
+    }
+    keyToActionRef.current = map;
+
+    // Also subscribe to future binding changes
+    const unsubscribe = useShortcutStore.subscribe((state) => {
+      const updated = new Map<string, string>();
+      for (const [actionId, keys] of Object.entries(state.bindings)) {
+        updated.set(keys.toLowerCase(), actionId);
+      }
+      keyToActionRef.current = updated;
+    });
+
+    return unsubscribe;
+  }, []);
+
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
       // Don't interfere with shortcut recording
@@ -61,15 +84,10 @@ export function useKeyboard() {
       const isInput =
         target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable;
       const keyString = eventToKeyString(e);
-      const bindings = useShortcutStore.getState().bindings;
 
-      // Build reverse lookup
-      const actionForKey = Object.entries(bindings).find(
-        ([, keys]) => keys.toLowerCase() === keyString.toLowerCase(),
-      );
+      const actionId = keyToActionRef.current.get(keyString.toLowerCase());
 
-      if (!actionForKey) return;
-      const [actionId] = actionForKey;
+      if (!actionId) return;
 
       // Command palette always works even in inputs
       if (actionId === "command-palette") {

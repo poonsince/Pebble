@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { getMessageWithHtml, getRenderedHtml } from "@/lib/api";
 import { useUpdateFlagsMutation } from "@/hooks/mutations/useUpdateFlagsMutation";
+import { sanitizeHtml } from "@/lib/sanitizeHtml";
 import type { Message, RenderedHtml, PrivacyMode } from "@/lib/api";
 
 export function useMessageLoader(messageId: string | null, privacyMode: PrivacyMode) {
@@ -29,7 +30,7 @@ export function useMessageLoader(messageId: string | null, privacyMode: PrivacyM
         if (cancelled || !result) return;
         const [msg, html] = result;
         setMessage(msg);
-        setRendered(html);
+        setRendered({ ...html, html: sanitizeHtml(html.html) });
 
         if (!msg.is_read) {
           flagsMutation.mutate({ messageId: messageId!, isRead: true });
@@ -50,7 +51,7 @@ export function useMessageLoader(messageId: string | null, privacyMode: PrivacyM
     setRendered(null);
 
     getRenderedHtml(messageId, privacyMode).then((html) => {
-      if (!cancelled) setRendered(html);
+      if (!cancelled) setRendered({ ...html, html: sanitizeHtml(html.html) });
     });
 
     return () => { cancelled = true; };
