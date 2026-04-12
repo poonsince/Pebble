@@ -1,7 +1,7 @@
 use pebble_core::{PebbleError, Result};
 use rusqlite::Connection;
 
-const CURRENT_VERSION: u32 = 4;
+const CURRENT_VERSION: u32 = 5;
 
 fn get_schema_version(conn: &Connection) -> u32 {
     conn.pragma_query_value(None, "user_version", |row| row.get(0))
@@ -65,6 +65,15 @@ pub fn run_migrations(conn: &Connection) -> Result<()> {
              CREATE INDEX IF NOT EXISTS idx_messages_thread_date ON messages(thread_id, date) WHERE thread_id IS NOT NULL AND is_deleted = 0;"
         )
         .map_err(|e| PebbleError::Storage(format!("Migration V4 failed: {e}")))?;
+        set_schema_version(conn, 4)?;
+    }
+
+    // V5: add composite index for folder_id + message_id covering queries
+    if version < 5 {
+        conn.execute_batch(
+            "CREATE INDEX IF NOT EXISTS idx_mf_folder_message ON message_folders(folder_id, message_id);",
+        )
+        .map_err(|e| PebbleError::Storage(format!("Migration V5 failed: {e}")))?;
         set_schema_version(conn, CURRENT_VERSION)?;
     }
 
