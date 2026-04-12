@@ -11,6 +11,7 @@ import { useToastStore } from "@/stores/toast.store";
 import AccountSetup from "@/components/AccountSetup";
 import { extractErrorMessage } from "@/lib/extractErrorMessage";
 import { getSignature, setSignature } from "@/lib/signatures";
+import { inputStyle, labelStyle } from "../../styles/form";
 
 export default function AccountsTab() {
   const { t } = useTranslation();
@@ -385,24 +386,6 @@ function EditAccountModal({ account, onClose, onSaved }: {
       setLoading(false);
     }
   }
-
-  const inputStyle: React.CSSProperties = {
-    width: "100%",
-    padding: "7px 10px",
-    borderRadius: "6px",
-    border: "1px solid var(--color-border)",
-    backgroundColor: "var(--color-bg)",
-    color: "var(--color-text-primary)",
-    fontSize: "13px",
-    boxSizing: "border-box",
-  };
-
-  const labelStyle: React.CSSProperties = {
-    display: "block",
-    fontSize: "12px",
-    color: "var(--color-text-secondary)",
-    marginBottom: "4px",
-  };
 
   const fieldStyle: React.CSSProperties = {
     display: "flex",

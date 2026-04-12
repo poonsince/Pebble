@@ -1,5 +1,10 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
+import {
+  inputStyle as baseInputStyle,
+  labelStyle as baseLabelStyle,
+  fieldGroupStyle,
+} from "../../styles/form";
 import { useQueryClient } from "@tanstack/react-query";
 import ConfirmDialog from "@/components/ConfirmDialog";
 import {
@@ -26,26 +31,14 @@ function errorMessage(err: unknown): string {
 const LAST_BACKUP_KEY = "pebble-cloud-sync-last-backup";
 
 const labelStyle: React.CSSProperties = {
-  display: "block",
-  fontSize: "12px",
+  ...baseLabelStyle,
   fontWeight: 500,
-  color: "var(--color-text-secondary)",
-  marginBottom: "4px",
 };
 
 const inputStyle: React.CSSProperties = {
-  width: "100%",
+  ...baseInputStyle,
   padding: "8px 10px",
-  fontSize: "13px",
-  border: "1px solid var(--color-border)",
-  borderRadius: "6px",
-  background: "var(--color-bg-secondary)",
-  color: "var(--color-text-primary)",
-  boxSizing: "border-box",
-};
-
-const fieldGroupStyle: React.CSSProperties = {
-  marginBottom: "14px",
+  backgroundColor: "var(--color-bg-secondary)",
 };
 
 const buttonStyle: React.CSSProperties = {

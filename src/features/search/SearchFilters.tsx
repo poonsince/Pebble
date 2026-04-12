@@ -2,6 +2,10 @@ import { useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import type { AdvancedSearchQuery, Folder } from "@/lib/api";
 import { listAccounts, listFolders } from "@/lib/api";
+import {
+  inputStyle as baseInputStyle,
+  labelStyle,
+} from "../../styles/form";
 
 interface FolderWithAccount extends Folder {
   accountEmail: string;
@@ -34,22 +38,10 @@ export default function SearchFilters({ filters, onChange, onClear }: Props) {
     onChange({ ...filters, ...patch });
   }
 
-  const labelStyle: React.CSSProperties = {
-    fontSize: "12px",
-    color: "var(--color-text-secondary)",
-    marginBottom: "4px",
-    display: "block",
-  };
-
   const inputStyle: React.CSSProperties = {
-    width: "100%",
+    ...baseInputStyle,
     padding: "6px 8px",
-    fontSize: "13px",
-    border: "1px solid var(--color-border)",
     borderRadius: "4px",
-    backgroundColor: "var(--color-bg)",
-    color: "var(--color-text-primary)",
-    boxSizing: "border-box",
   };
 
   const fieldStyle: React.CSSProperties = {

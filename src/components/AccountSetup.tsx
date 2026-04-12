@@ -8,6 +8,7 @@ import { addAccount, startSync, testImapConnection, completeOAuthFlow } from "@/
 import type { AddAccountRequest } from "@/lib/api";
 import { accountsQueryKey } from "@/hooks/queries";
 import { extractErrorMessage } from "@/lib/extractErrorMessage";
+import { inputStyle, labelStyle } from "../styles/form";
 
 const PRESETS: Record<
   string,
@@ -222,24 +223,6 @@ export default function AccountSetup({ onClose }: Props) {
       setLoading(false);
     }
   }
-
-  const inputStyle: React.CSSProperties = {
-    width: "100%",
-    padding: "7px 10px",
-    borderRadius: "6px",
-    border: "1px solid var(--color-border)",
-    backgroundColor: "var(--color-bg)",
-    color: "var(--color-text-primary)",
-    fontSize: "13px",
-    boxSizing: "border-box",
-  };
-
-  const labelStyle: React.CSSProperties = {
-    display: "block",
-    fontSize: "12px",
-    color: "var(--color-text-secondary)",
-    marginBottom: "4px",
-  };
 
   const fieldStyle: React.CSSProperties = {
     display: "flex",
