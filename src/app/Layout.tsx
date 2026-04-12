@@ -13,13 +13,13 @@ import { useKanbanStore } from "../stores/kanban.store";
 import { useKeyboard } from "../hooks/useKeyboard";
 import { useNetworkStatus } from "../hooks/useNetworkStatus";
 import { buildCommands } from "../features/command-palette/commands";
-import { useEffect, Component, type ReactNode, type ErrorInfo } from "react";
-import SettingsView from "../features/settings/SettingsView";
-import ComposeView from "../features/compose/ComposeView";
-import KanbanView from "../features/kanban/KanbanView";
-import SearchView from "../features/search/SearchView";
-import SnoozedView from "../features/snoozed/SnoozedView";
-import StarredView from "../features/starred/StarredView";
+import { useEffect, lazy, Suspense, Component, type ReactNode, type ErrorInfo } from "react";
+const SettingsView = lazy(() => import("../features/settings/SettingsView"));
+const ComposeView = lazy(() => import("../features/compose/ComposeView"));
+const KanbanView = lazy(() => import("../features/kanban/KanbanView"));
+const SearchView = lazy(() => import("../features/search/SearchView"));
+const SnoozedView = lazy(() => import("../features/snoozed/SnoozedView"));
+const StarredView = lazy(() => import("../features/starred/StarredView"));
 import { useTranslation } from "react-i18next";
 import i18next from "i18next";
 import { WifiOff } from "lucide-react";
@@ -86,6 +86,7 @@ export default function Layout() {
         <main className="flex-1 min-w-0 overflow-auto" style={{ position: "relative" }}>
           <OfflineBanner />
           <ViewErrorBoundary key={activeView}>
+            <Suspense fallback={<ViewLoadingFallback />}>
               {activeView === "inbox" && <InboxView />}
               {activeView === "kanban" && <KanbanView />}
               {activeView === "settings" && <SettingsView />}
@@ -93,6 +94,7 @@ export default function Layout() {
               {activeView === "snoozed" && <SnoozedView />}
               {activeView === "starred" && <StarredView />}
               {activeView === "compose" && <ComposeView />}
+            </Suspense>
           </ViewErrorBoundary>
         </main>
       </div>
@@ -101,6 +103,21 @@ export default function Layout() {
       <CommandPalette />
       <ToastContainer />
       <GlobalConfirmDialog />
+    </div>
+  );
+}
+
+function ViewLoadingFallback() {
+  return (
+    <div style={{
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+      height: "100%",
+      color: "var(--color-text-secondary)",
+      fontSize: "13px",
+    }}>
+      Loading...
     </div>
   );
 }
