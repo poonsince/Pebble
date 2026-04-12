@@ -1016,6 +1016,31 @@ impl Store {
             Ok(count as u64)
         })
     }
+
+    /// Count unread messages per folder for an account.
+    pub fn get_folder_unread_counts(
+        &self,
+        account_id: &str,
+    ) -> Result<std::collections::HashMap<String, u32>> {
+        self.with_read(|conn| {
+            let mut stmt = conn.prepare(
+                "SELECT mf.folder_id, COUNT(*)
+                 FROM messages m
+                 JOIN message_folders mf ON m.id = mf.message_id
+                 WHERE m.account_id = ?1 AND m.is_read = 0 AND m.is_deleted = 0
+                 GROUP BY mf.folder_id"
+            )?;
+            let rows = stmt.query_map(params![account_id], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, u32>(1)?))
+            })?;
+            let mut counts = std::collections::HashMap::new();
+            for row in rows {
+                let (fid, count) = row?;
+                counts.insert(fid, count);
+            }
+            Ok(counts)
+        })
+    }
 }
 
 #[cfg(test)]

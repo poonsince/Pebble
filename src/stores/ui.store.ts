@@ -63,6 +63,8 @@ interface UIState {
   setPollInterval: (secs: number) => void;
   searchQuery: string;
   setSearchQuery: (q: string) => void;
+  showFolderUnreadCount: boolean;
+  setShowFolderUnreadCount: (show: boolean) => void;
 }
 
 export const useUIStore = create<UIState>((set) => ({
@@ -154,4 +156,9 @@ export const useUIStore = create<UIState>((set) => ({
   },
   searchQuery: "",
   setSearchQuery: (q) => set({ searchQuery: q }),
+  showFolderUnreadCount: localStorage.getItem("pebble-show-unread-count") === "true",
+  setShowFolderUnreadCount: (show) => {
+    localStorage.setItem("pebble-show-unread-count", String(show));
+    set({ showFolderUnreadCount: show });
+  },
 }));

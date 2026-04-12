@@ -24,6 +24,13 @@ export default function GeneralTab() {
     });
   }, []);
 
+  const showUnreadCount = useUIStore((s) => s.showFolderUnreadCount);
+  const setShowUnreadCount = useUIStore((s) => s.setShowFolderUnreadCount);
+
+  const toggleUnreadCount = useCallback(() => {
+    setShowUnreadCount(!showUnreadCount);
+  }, [showUnreadCount, setShowUnreadCount]);
+
   return (
     <div>
       <h3 style={{ fontSize: "14px", fontWeight: 600, marginBottom: "8px" }}>
@@ -71,6 +78,27 @@ export default function GeneralTab() {
       >
         <input type="checkbox" checked={notificationsEnabled} onChange={toggleNotifications} />
         <span>{t("settings.enableNotifications")}</span>
+      </label>
+
+      <h3 style={{ fontSize: "14px", fontWeight: 600, marginBottom: "16px", marginTop: "32px" }}>
+        {t("settings.folderCounts", "Folder Counts")}
+      </h3>
+      <label
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: "8px",
+          cursor: "pointer",
+          fontSize: "13px",
+          color: "var(--color-text-primary)",
+        }}
+      >
+        <input
+          type="checkbox"
+          checked={showUnreadCount}
+          onChange={toggleUnreadCount}
+        />
+        <span>{t("settings.showUnreadCount", "Show unread count badges in sidebar")}</span>
       </label>
     </div>
   );

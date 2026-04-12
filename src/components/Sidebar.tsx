@@ -18,6 +18,7 @@ import { useUIStore, isComposeDirty } from "../stores/ui.store";
 import { useConfirmStore } from "../stores/confirm.store";
 import { useMailStore } from "../stores/mail.store";
 import { useAccountsQuery, useFoldersQuery } from "../hooks/queries";
+import { useFolderUnreadCounts } from "../hooks/queries/useFolderUnreadCounts";
 import type { Account, Folder as FolderType } from "../lib/api";
 
 const EMPTY_ACCOUNTS: Account[] = [];
@@ -56,8 +57,10 @@ export default function Sidebar() {
   const setActiveAccountId = useMailStore((s) => s.setActiveAccountId);
   const setActiveFolderId = useMailStore((s) => s.setActiveFolderId);
 
+  const showUnread = useUIStore((s) => s.showFolderUnreadCount);
   const { data: accounts = EMPTY_ACCOUNTS } = useAccountsQuery();
   const { data: folders = EMPTY_FOLDERS } = useFoldersQuery(activeAccountId);
+  const { data: unreadCounts = {} } = useFolderUnreadCounts(activeAccountId);
 
   const ROLE_LABELS: Record<string, string> = {
     inbox: t("sidebar.inbox"),
@@ -242,6 +245,7 @@ export default function Sidebar() {
                   key={folder.id}
                   icon={folderIcon(folder.role)}
                   label={folderLabel(folder)}
+                  badge={showUnread ? unreadCounts[folder.id] : undefined}
                   isActive={isActive}
                   collapsed={sidebarCollapsed}
                   style={buttonBase}
@@ -330,10 +334,11 @@ export default function Sidebar() {
 
 // Reusable sidebar button to avoid repetitive hover logic
 function SidebarButton({
-  icon, label, isActive, collapsed, style, disabled, onClick,
+  icon, label, badge, isActive, collapsed, style, disabled, onClick,
 }: {
   icon: React.ReactNode;
   label: string;
+  badge?: number;
   isActive: boolean;
   collapsed: boolean;
   style: React.CSSProperties;
@@ -367,8 +372,19 @@ function SidebarButton({
     >
       {icon}
       {!collapsed && (
-        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 }}>
           {label}
+        </span>
+      )}
+      {!collapsed && badge != null && badge > 0 && (
+        <span style={{
+          fontSize: "11px",
+          fontWeight: 600,
+          color: "var(--color-accent)",
+          minWidth: "18px",
+          textAlign: "right",
+        }}>
+          {badge}
         </span>
       )}
     </button>
