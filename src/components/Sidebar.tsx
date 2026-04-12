@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
 import {
   Inbox,
   Send,
@@ -51,12 +51,10 @@ export default function Sidebar() {
   const activeView = useUIStore((s) => s.activeView);
   const setActiveView = useUIStore((s) => s.setActiveView);
   const sidebarCollapsed = useUIStore((s) => s.sidebarCollapsed);
-  const {
-    activeFolderId,
-    activeAccountId,
-    setActiveAccountId,
-    setActiveFolderId,
-  } = useMailStore();
+  const activeFolderId = useMailStore((s) => s.activeFolderId);
+  const activeAccountId = useMailStore((s) => s.activeAccountId);
+  const setActiveAccountId = useMailStore((s) => s.setActiveAccountId);
+  const setActiveFolderId = useMailStore((s) => s.setActiveFolderId);
 
   const { data: accounts = EMPTY_ACCOUNTS } = useAccountsQuery();
   const { data: folders = EMPTY_FOLDERS } = useFoldersQuery(activeAccountId);
@@ -74,7 +72,7 @@ export default function Sidebar() {
   const hasRealFolders = folders.length > 0;
 
   // Deduplicate folders by role, insert archive after sent
-  const dedupedFolders = (() => {
+  const dedupedFolders = useMemo(() => {
     const seenRoles = new Set<string>();
     const result = folders.filter((f) => {
       if (f.role === "archive") return false; // inserted manually after sent
@@ -90,7 +88,7 @@ export default function Sidebar() {
       result.splice(sentIdx >= 0 ? sentIdx + 1 : result.length, 0, archiveFolder);
     }
     return result;
-  })();
+  }, [folders]);
 
   // Auto-select first account
   useEffect(() => {

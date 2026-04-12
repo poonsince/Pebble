@@ -8,7 +8,9 @@ import Spinner from "@/components/Spinner";
 
 export default function ThreadView() {
   const { t } = useTranslation();
-  const { selectedThreadId, setSelectedThreadId, activeFolderId } = useMailStore();
+  const selectedThreadId = useMailStore((s) => s.selectedThreadId);
+  const setSelectedThreadId = useMailStore((s) => s.setSelectedThreadId);
+  const activeFolderId = useMailStore((s) => s.activeFolderId);
   const { data: threadMessages = [], isLoading } = useThreadMessagesQuery(selectedThreadId);
   const { data: threads = [] } = useThreadsQuery(activeFolderId);
   const scrollRef = useRef<HTMLDivElement>(null);
