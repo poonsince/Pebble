@@ -50,6 +50,19 @@ export default function Layout() {
     invoke("set_notifications_enabled", { enabled }).catch(() => {});
   }, [t]);
 
+  // Global listener: update sync status when backend starts a sync pass
+  useEffect(() => {
+    const unlisten = listen<{ account_id: string; status: string }>("mail:sync-progress", (event) => {
+      const { status } = event.payload;
+      if (status === "started") {
+        useUIStore.getState().setSyncStatus("syncing");
+      } else if (status === "error") {
+        useUIStore.getState().setSyncStatus("error");
+      }
+    });
+    return () => { unlisten.then((fn) => fn()); };
+  }, []);
+
   // Global listener: refresh data when snoozed messages are restored
   useEffect(() => {
     const unlisten = listen<{ message_id: string; return_to?: string }>("mail:unsnoozed", (event) => {
