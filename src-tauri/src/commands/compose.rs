@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use crate::state::AppState;
 use crate::commands::oauth::ensure_account_oauth_tokens;
 use pebble_core::traits::{MailTransport, OutgoingMessage};
@@ -5,6 +7,47 @@ use pebble_core::{EmailAddress, PebbleError, ProviderType};
 use pebble_mail::{GmailProvider, OutlookProvider};
 use pebble_mail::smtp::SmtpSender;
 use tauri::State;
+
+/// Validate that all attachment paths are within allowed directories.
+fn validate_attachment_paths(paths: &[String], attachments_dir: &std::path::Path) -> std::result::Result<Vec<String>, PebbleError> {
+    let mut allowed_dirs: Vec<PathBuf> = vec![attachments_dir.to_path_buf()];
+
+    // Add user home subdirectories (Documents, Downloads, Desktop) and temp dir
+    if let Ok(home) = std::env::var("USERPROFILE").or_else(|_| std::env::var("HOME")) {
+        let home = PathBuf::from(home);
+        for sub in &["Documents", "Downloads", "Desktop"] {
+            let dir = home.join(sub);
+            if dir.exists() {
+                allowed_dirs.push(dir);
+            }
+        }
+    }
+    if let Ok(tmp) = std::env::temp_dir().canonicalize() {
+        allowed_dirs.push(tmp);
+    }
+
+    // Canonicalize allowed dirs for consistent comparison
+    let allowed_dirs: Vec<PathBuf> = allowed_dirs
+        .into_iter()
+        .filter_map(|d| std::fs::canonicalize(&d).ok())
+        .collect();
+
+    let mut validated = Vec::with_capacity(paths.len());
+    for raw_path in paths {
+        let canonical = std::fs::canonicalize(raw_path)
+            .map_err(|e| PebbleError::Internal(format!("Attachment path not found: {raw_path} ({e})")))?;
+
+        let is_allowed = allowed_dirs.iter().any(|dir| canonical.starts_with(dir));
+        if !is_allowed {
+            return Err(PebbleError::Internal(format!(
+                "Attachment path is outside allowed directories: {}",
+                canonical.display()
+            )));
+        }
+        validated.push(canonical.to_string_lossy().into_owned());
+    }
+    Ok(validated)
+}
 
 fn parse_recipients(addresses: Vec<String>) -> Vec<EmailAddress> {
     addresses
@@ -31,7 +74,12 @@ pub async fn send_email(
     in_reply_to: Option<String>,
     attachment_paths: Option<Vec<String>>,
 ) -> std::result::Result<(), PebbleError> {
-    let attachment_paths = attachment_paths.unwrap_or_default();
+    let raw_paths = attachment_paths.unwrap_or_default();
+    let attachment_paths = if raw_paths.is_empty() {
+        raw_paths
+    } else {
+        validate_attachment_paths(&raw_paths, &state.attachments_dir)?
+    };
     let account = state
         .store
         .get_account(&account_id)?

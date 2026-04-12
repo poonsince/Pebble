@@ -5,7 +5,7 @@ use pebble_mail::ImapProvider;
 use tauri::State;
 use tracing::warn;
 
-use super::{connect_gmail, find_message_folder, get_imap_config};
+use super::{connect_gmail, connect_outlook, find_message_folder, get_imap_config};
 
 #[tauri::command]
 pub async fn update_message_flags(
@@ -56,7 +56,24 @@ pub async fn update_message_flags(
                     }
                 }
             }
-            Some(ProviderType::Imap) | Some(ProviderType::Outlook) | None => {
+            Some(ProviderType::Outlook) => {
+                let remote_id = msg.remote_id.clone();
+                if let Ok(provider) = connect_outlook(&state, &msg.account_id).await {
+                    tokio::task::spawn(async move {
+                        if let Some(read) = is_read {
+                            if let Err(e) = provider.update_read_status(&remote_id, read).await {
+                                warn!("Outlook read status writeback failed: {e}");
+                            }
+                        }
+                        if let Some(starred) = is_starred {
+                            if let Err(e) = provider.update_flag_status(&remote_id, starred).await {
+                                warn!("Outlook flag writeback failed: {e}");
+                            }
+                        }
+                    });
+                }
+            }
+            Some(ProviderType::Imap) | None => {
                 if let Ok(folder) = find_message_folder(&state, &message_id, &msg.account_id) {
                     if let Ok(uid) = msg.remote_id.parse::<u32>() {
                         if let Ok(imap_config) = get_imap_config(&state, &msg.account_id) {

@@ -1,11 +1,11 @@
 use crate::state::AppState;
-use pebble_core::traits::LabelProvider;
+use pebble_core::traits::{FolderProvider, LabelProvider};
 use pebble_core::{FolderRole, PebbleError, ProviderType};
 use tauri::State;
 use tracing::{info, warn};
 
 use super::{
-    connect_gmail, connect_imap, find_folder_by_role, find_message_folder,
+    connect_gmail, connect_imap, connect_outlook, find_folder_by_role, find_message_folder,
     refresh_search_document, remove_search_documents,
 };
 
@@ -52,7 +52,21 @@ pub async fn archive_message(
                         }
                     }
                 }
-                ProviderType::Imap | ProviderType::Outlook => {
+                ProviderType::Outlook => {
+                    if !is_local {
+                        match connect_outlook(&state, &msg.account_id).await {
+                            Ok(provider) => {
+                                if let Err(e) = provider.move_message(&msg.remote_id, &archive_folder.remote_id).await {
+                                    warn!("Outlook move to archive failed: {e}");
+                                } else {
+                                    info!("Archived Outlook message {} from {} to {}", message_id, source_folder.name, archive_folder.name);
+                                }
+                            }
+                            Err(e) => warn!("Outlook connect failed for archive: {e}"),
+                        }
+                    }
+                }
+                ProviderType::Imap => {
                     // Move on IMAP server (only if archive folder exists on server)
                     if !is_local {
                         let uid: u32 = msg.remote_id.parse()
@@ -120,7 +134,23 @@ pub async fn delete_message(
                 }
             }
         }
-        ProviderType::Imap | ProviderType::Outlook => {
+        ProviderType::Outlook => {
+            match connect_outlook(&state, &msg.account_id).await {
+                Ok(provider) => {
+                    if source_folder.role == Some(FolderRole::Trash) {
+                        if let Err(e) = provider.delete_message_permanently(&msg.remote_id).await {
+                            warn!("Outlook permanent delete failed: {e}");
+                        }
+                    } else if let Err(e) = provider.trash_message(&msg.remote_id).await {
+                        warn!("Outlook trash failed: {e}");
+                    } else {
+                        info!("Moved Outlook message {} to Trash on server", message_id);
+                    }
+                }
+                Err(e) => warn!("Outlook connect failed for delete: {e}"),
+            }
+        }
+        ProviderType::Imap => {
             // Try IMAP operations but don't block local deletion on failure
             if let Ok(uid) = msg.remote_id.parse::<u32>() {
                 match connect_imap(&state, &msg.account_id).await {
@@ -201,7 +231,14 @@ pub async fn restore_message(
                 }
             }
         }
-        ProviderType::Imap | ProviderType::Outlook => {
+        ProviderType::Outlook => {
+            if let Ok(provider) = connect_outlook(&state, &msg.account_id).await {
+                if let Err(e) = provider.restore_message(&msg.remote_id).await {
+                    warn!("Outlook restore failed: {e}");
+                }
+            }
+        }
+        ProviderType::Imap => {
             // Try to move on IMAP server too (skip for local-only folders)
             if let Ok(uid) = msg.remote_id.parse::<u32>() {
                 if let Some(ref src) = source_folder {
@@ -249,7 +286,14 @@ pub async fn empty_trash(
                 }
             }
         }
-        ProviderType::Imap | ProviderType::Outlook => {
+        ProviderType::Outlook => {
+            if let Ok(provider) = connect_outlook(&state, &account_id).await {
+                for msg in &messages {
+                    let _ = provider.delete_message_permanently(&msg.remote_id).await;
+                }
+            }
+        }
+        ProviderType::Imap => {
             // Try to permanently delete on IMAP server
             if let Ok(imap) = connect_imap(&state, &account_id).await {
                 for msg in &messages {

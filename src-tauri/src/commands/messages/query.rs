@@ -10,10 +10,15 @@ pub async fn list_messages(
     limit: u32,
     offset: u32,
 ) -> std::result::Result<Vec<MessageSummary>, PebbleError> {
-    match folder_ids {
-        Some(ids) if !ids.is_empty() => state.store.list_messages_by_folders(&ids, limit, offset),
-        _ => state.store.list_messages_by_folder(&folder_id, limit, offset),
-    }
+    let store = state.store.clone();
+    tokio::task::spawn_blocking(move || {
+        match folder_ids {
+            Some(ids) if !ids.is_empty() => store.list_messages_by_folders(&ids, limit, offset),
+            _ => store.list_messages_by_folder(&folder_id, limit, offset),
+        }
+    })
+    .await
+    .map_err(|e| PebbleError::Internal(format!("Task join error: {e}")))?
 }
 
 #[tauri::command]
@@ -23,7 +28,12 @@ pub async fn list_starred_messages(
     limit: u32,
     offset: u32,
 ) -> std::result::Result<Vec<MessageSummary>, PebbleError> {
-    state.store.list_starred_messages(&account_id, limit, offset)
+    let store = state.store.clone();
+    tokio::task::spawn_blocking(move || {
+        store.list_starred_messages(&account_id, limit, offset)
+    })
+    .await
+    .map_err(|e| PebbleError::Internal(format!("Task join error: {e}")))?
 }
 
 #[tauri::command]
@@ -31,7 +41,12 @@ pub async fn get_message(
     state: State<'_, AppState>,
     message_id: String,
 ) -> std::result::Result<Option<Message>, PebbleError> {
-    state.store.get_message(&message_id)
+    let store = state.store.clone();
+    tokio::task::spawn_blocking(move || {
+        store.get_message(&message_id)
+    })
+    .await
+    .map_err(|e| PebbleError::Internal(format!("Task join error: {e}")))?
 }
 
 #[tauri::command]
@@ -39,5 +54,10 @@ pub async fn get_messages_batch(
     state: State<'_, AppState>,
     message_ids: Vec<String>,
 ) -> std::result::Result<Vec<Message>, PebbleError> {
-    state.store.get_messages_batch(&message_ids)
+    let store = state.store.clone();
+    tokio::task::spawn_blocking(move || {
+        store.get_messages_batch(&message_ids)
+    })
+    .await
+    .map_err(|e| PebbleError::Internal(format!("Task join error: {e}")))?
 }

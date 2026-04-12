@@ -62,6 +62,8 @@ pub async fn translate_text(
     let provider_config: TranslateProviderConfig = serde_json::from_str(&decrypted)
         .map_err(|e| PebbleError::Translate(format!("Invalid config: {e}")))?;
 
+    validate_provider_config(&provider_config)?;
+
     TranslateService::translate(&provider_config, &text, &from_lang, &to_lang).await
 }
 
@@ -87,6 +89,11 @@ pub async fn save_translate_config(
     config: String,
     is_enabled: bool,
 ) -> std::result::Result<(), PebbleError> {
+    // Validate URL(s) in config before persisting
+    let provider_config: TranslateProviderConfig = serde_json::from_str(&config)
+        .map_err(|e| PebbleError::Translate(format!("Invalid config: {e}")))?;
+    validate_provider_config(&provider_config)?;
+
     let now = now_timestamp();
     // Encrypt config before storing
     let encrypted = encrypt_config(&state, &config)?;
@@ -99,6 +106,18 @@ pub async fn save_translate_config(
         updated_at: now,
     };
     state.store.save_translate_config(&tc)
+}
+
+/// Validate URL(s) in a TranslateProviderConfig.
+fn validate_provider_config(
+    provider_config: &TranslateProviderConfig,
+) -> std::result::Result<(), PebbleError> {
+    match provider_config {
+        TranslateProviderConfig::DeepLX { endpoint } => validate_translate_url(endpoint),
+        TranslateProviderConfig::GenericApi { endpoint, .. } => validate_translate_url(endpoint),
+        TranslateProviderConfig::LLM { endpoint, .. } => validate_translate_url(endpoint),
+        TranslateProviderConfig::DeepL { .. } => Ok(()), // uses official API, no custom URL
+    }
 }
 
 /// Validate that a translate endpoint URL is safe (HTTPS required, HTTP only for localhost).
@@ -134,12 +153,7 @@ pub async fn test_translate_connection(
         .map_err(|e| PebbleError::Translate(format!("Invalid config: {e}")))?;
 
     // Validate endpoint URLs before making any requests
-    match &provider_config {
-        TranslateProviderConfig::DeepLX { endpoint } => validate_translate_url(endpoint)?,
-        TranslateProviderConfig::GenericApi { endpoint, .. } => validate_translate_url(endpoint)?,
-        TranslateProviderConfig::LLM { endpoint, .. } => validate_translate_url(endpoint)?,
-        TranslateProviderConfig::DeepL { .. } => {} // uses official API, no custom URL
-    }
+    validate_provider_config(&provider_config)?;
 
     let result = TranslateService::translate(&provider_config, "Hello", "en", "zh").await?;
     Ok(result.translated)

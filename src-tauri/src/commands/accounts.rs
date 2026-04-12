@@ -1,10 +1,24 @@
 use crate::state::AppState;
 use crate::commands::oauth::ensure_account_oauth_tokens;
 use pebble_core::{Account, PebbleError, ProviderType, new_id, now_timestamp};
-use pebble_mail::ConnectionSecurity;
+use pebble_mail::{ConnectionSecurity, ImapConfig, ProxyConfig, SmtpConfig};
 use pebble_mail::GmailProvider;
-use serde::Deserialize;
+use pebble_mail::OutlookProvider;
+use pebble_core::traits::FolderProvider;
+use serde::{Deserialize, Serialize};
 use tauri::State;
+
+/// Typed view of the encrypted `auth_data` blob for an IMAP/SMTP account.
+///
+/// Prior code patched this blob with hand-written `serde_json::Value`
+/// mutations, which silently dropped fields when serde and JSON shapes
+/// drifted. Parsing into this struct makes the shape explicit and reuses
+/// `ImapConfig` / `SmtpConfig`'s own legacy-aware deserializers.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct AccountCredentials {
+    imap: ImapConfig,
+    smtp: SmtpConfig,
+}
 
 #[allow(dead_code)]
 #[derive(Deserialize)]
@@ -61,30 +75,31 @@ pub async fn add_account(
 
     // Build proxy config if provided
     let proxy = match (request.proxy_host, request.proxy_port) {
-        (Some(h), Some(p)) if !h.is_empty() => Some(pebble_mail::ProxyConfig { host: h, port: p }),
+        (Some(h), Some(p)) if !h.is_empty() => Some(ProxyConfig { host: h, port: p }),
         _ => None,
     };
 
-    // Build IMAP + SMTP config
-    let imap_config = pebble_mail::ImapConfig {
-        host: request.imap_host,
-        port: request.imap_port,
-        username: request.username.clone(),
-        password: request.password.clone(),
-        security: request.imap_security,
-        proxy,
-    };
-    let smtp_config = pebble_mail::SmtpConfig {
-        host: request.smtp_host,
-        port: request.smtp_port,
-        username: request.username,
-        password: request.password,
-        security: request.smtp_security,
+    // Build typed IMAP + SMTP credentials
+    let credentials = AccountCredentials {
+        imap: ImapConfig {
+            host: request.imap_host,
+            port: request.imap_port,
+            username: request.username.clone(),
+            password: request.password.clone(),
+            security: request.imap_security,
+            proxy,
+        },
+        smtp: SmtpConfig {
+            host: request.smtp_host,
+            port: request.smtp_port,
+            username: request.username,
+            password: request.password,
+            security: request.smtp_security,
+        },
     };
 
     // Encrypt credentials and store as auth_data
-    let config = serde_json::json!({ "imap": imap_config, "smtp": smtp_config });
-    let config_bytes = serde_json::to_vec(&config)
+    let config_bytes = serde_json::to_vec(&credentials)
         .map_err(|e| PebbleError::Internal(format!("Failed to serialize config: {e}")))?;
     let encrypted = state.crypto.encrypt(&config_bytes)?;
     state.store.set_auth_data(&account.id, &encrypted)?;
@@ -95,12 +110,9 @@ pub async fn add_account(
         ProviderType::Outlook => "outlook",
         ProviderType::Imap => "imap",
     };
-    let metadata = serde_json::json!({ "provider": provider_slug });
-    let metadata_json = serde_json::to_string(&metadata)
-        .map_err(|e| PebbleError::Internal(format!("Failed to serialize metadata: {e}")))?;
-    state
-        .store
-        .update_account_sync_state(&account.id, &metadata_json)?;
+    state.store.update_sync_state(&account.id, |s| {
+        s.provider = Some(provider_slug.to_string());
+    })?;
 
     Ok(account)
 }
@@ -123,65 +135,72 @@ pub async fn update_account(
 ) -> std::result::Result<(), PebbleError> {
     state.store.update_account(&account_id, &email, &display_name)?;
 
-    // Update credentials if any connection fields changed
-    if password.is_some() || imap_host.is_some() || smtp_host.is_some()
+    let credentials_dirty = password.is_some() || imap_host.is_some() || smtp_host.is_some()
         || imap_port.is_some() || smtp_port.is_some()
         || imap_security.is_some() || smtp_security.is_some()
-        || proxy_host.is_some() || proxy_port.is_some()
-    {
-        // Read existing config
-        let existing = state.store.get_auth_data(&account_id)?;
-        let mut config: serde_json::Value = if let Some(encrypted) = existing {
+        || proxy_host.is_some() || proxy_port.is_some();
+    if !credentials_dirty {
+        return Ok(());
+    }
+
+    // Parse the existing encrypted blob into a typed view. If the row is
+    // missing (first-time edit, or a legacy OAuth-only account moving to
+    // IMAP), seed a blank template that the mutations below can fill in.
+    let mut creds: AccountCredentials = match state.store.get_auth_data(&account_id)? {
+        Some(encrypted) => {
             let decrypted = state.crypto.decrypt(&encrypted)?;
             serde_json::from_slice(&decrypted)
                 .map_err(|e| PebbleError::Internal(format!("Failed to parse config: {e}")))?
-        } else {
-            serde_json::json!({ "imap": {}, "smtp": {} })
+        }
+        None => AccountCredentials {
+            imap: ImapConfig {
+                host: String::new(),
+                port: 0,
+                username: String::new(),
+                password: String::new(),
+                security: ConnectionSecurity::default(),
+                proxy: None,
+            },
+            smtp: SmtpConfig {
+                host: String::new(),
+                port: 0,
+                username: String::new(),
+                password: String::new(),
+                security: ConnectionSecurity::default(),
+            },
+        },
+    };
+
+    // IMAP side
+    if let Some(h) = imap_host { creds.imap.host = h; }
+    if let Some(p) = imap_port { creds.imap.port = p; }
+    if let Some(ref pw) = password { creds.imap.password = pw.clone(); }
+    if let Some(sec) = imap_security { creds.imap.security = sec; }
+    if proxy_host.is_some() || proxy_port.is_some() {
+        creds.imap.proxy = match (&proxy_host, &proxy_port) {
+            (Some(h), Some(p)) if !h.is_empty() => {
+                Some(ProxyConfig { host: h.clone(), port: *p })
+            }
+            _ => None,
         };
-
-        // Update IMAP fields
-        if let Some(imap) = config.get_mut("imap") {
-            if let Some(ref h) = imap_host { imap["host"] = serde_json::json!(h); }
-            if let Some(p) = imap_port { imap["port"] = serde_json::json!(p); }
-            if let Some(ref pw) = password { imap["password"] = serde_json::json!(pw); }
-            if let Some(ref sec) = imap_security {
-                imap["security"] = serde_json::to_value(sec).unwrap();
-                if let Some(obj) = imap.as_object_mut() { obj.remove("use_tls"); }
-            }
-            // Update proxy
-            if proxy_host.is_some() || proxy_port.is_some() {
-                match (&proxy_host, &proxy_port) {
-                    (Some(h), Some(p)) if !h.is_empty() => {
-                        imap["proxy"] = serde_json::json!({"host": h, "port": p});
-                    }
-                    _ => {
-                        if let Some(obj) = imap.as_object_mut() { obj.remove("proxy"); }
-                    }
-                }
-            }
-            if imap.get("username").and_then(|v| v.as_str()).unwrap_or("").is_empty() {
-                imap["username"] = serde_json::json!(email);
-            }
-        }
-        // Update SMTP fields
-        if let Some(smtp) = config.get_mut("smtp") {
-            if let Some(ref h) = smtp_host { smtp["host"] = serde_json::json!(h); }
-            if let Some(p) = smtp_port { smtp["port"] = serde_json::json!(p); }
-            if let Some(ref pw) = password { smtp["password"] = serde_json::json!(pw); }
-            if let Some(ref sec) = smtp_security {
-                smtp["security"] = serde_json::to_value(sec).unwrap();
-                if let Some(obj) = smtp.as_object_mut() { obj.remove("use_tls"); }
-            }
-            if smtp.get("username").and_then(|v| v.as_str()).unwrap_or("").is_empty() {
-                smtp["username"] = serde_json::json!(email);
-            }
-        }
-
-        let config_bytes = serde_json::to_vec(&config)
-            .map_err(|e| PebbleError::Internal(format!("Failed to serialize config: {e}")))?;
-        let encrypted = state.crypto.encrypt(&config_bytes)?;
-        state.store.set_auth_data(&account_id, &encrypted)?;
     }
+    if creds.imap.username.is_empty() {
+        creds.imap.username = email.clone();
+    }
+
+    // SMTP side
+    if let Some(h) = smtp_host { creds.smtp.host = h; }
+    if let Some(p) = smtp_port { creds.smtp.port = p; }
+    if let Some(ref pw) = password { creds.smtp.password = pw.clone(); }
+    if let Some(sec) = smtp_security { creds.smtp.security = sec; }
+    if creds.smtp.username.is_empty() {
+        creds.smtp.username = email.clone();
+    }
+
+    let config_bytes = serde_json::to_vec(&creds)
+        .map_err(|e| PebbleError::Internal(format!("Failed to serialize config: {e}")))?;
+    let encrypted = state.crypto.encrypt(&config_bytes)?;
+    state.store.set_auth_data(&account_id, &encrypted)?;
 
     Ok(())
 }
@@ -244,6 +263,17 @@ pub async fn test_account_connection(
             return Ok("Gmail connection successful".to_string());
         }
         return Ok(format!("Gmail connection successful ({email})"));
+    }
+
+    if matches!(account.provider, ProviderType::Outlook) {
+        let tokens = ensure_account_oauth_tokens(&state, &account_id, "outlook").await?;
+        let provider = OutlookProvider::new(tokens.access_token, account_id.clone());
+        // Graph connectivity check: list mail folders.
+        let folders = provider.list_folders().await?;
+        return Ok(format!(
+            "Outlook connection successful ({} folders)",
+            folders.len()
+        ));
     }
 
     let existing = state.store.get_auth_data(&account_id)?

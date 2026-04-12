@@ -8,7 +8,7 @@ pub mod rendering;
 use crate::commands::oauth::ensure_account_oauth_tokens;
 use crate::state::AppState;
 use pebble_core::{FolderRole, PebbleError};
-use pebble_mail::{GmailProvider, ImapConfig, ImapProvider};
+use pebble_mail::{GmailProvider, ImapConfig, ImapProvider, OutlookProvider};
 
 pub(super) async fn connect_gmail(
     state: &AppState,
@@ -16,6 +16,14 @@ pub(super) async fn connect_gmail(
 ) -> std::result::Result<GmailProvider, PebbleError> {
     let tokens = ensure_account_oauth_tokens(state, account_id, "gmail").await?;
     Ok(GmailProvider::new(tokens.access_token))
+}
+
+pub(super) async fn connect_outlook(
+    state: &AppState,
+    account_id: &str,
+) -> std::result::Result<OutlookProvider, PebbleError> {
+    let tokens = ensure_account_oauth_tokens(state, account_id, "outlook").await?;
+    Ok(OutlookProvider::new(tokens.access_token, account_id.to_string()))
 }
 
 pub(super) fn refresh_search_document(
@@ -62,11 +70,13 @@ pub(super) fn get_imap_config(state: &AppState, account_id: &str) -> std::result
         serde_json::from_value(value.get("imap").cloned().unwrap_or(value.clone()))
             .map_err(|e| PebbleError::Internal(format!("Failed to deserialize IMAP config: {e}")))
     } else {
-        let sync_json = state.store.get_account_sync_state(account_id)?
+        // Legacy path: IMAP config used to live inline in sync_state.
+        let sync_state = state.store.get_sync_state(account_id)?
             .ok_or_else(|| PebbleError::Internal(format!("No config for account {account_id}")))?;
-        let value: serde_json::Value = serde_json::from_str(&sync_json)
-            .map_err(|e| PebbleError::Internal(format!("Failed to parse sync state: {e}")))?;
-        serde_json::from_value(value.get("imap").cloned().unwrap_or(value))
+        let imap_value = sync_state.imap.ok_or_else(|| {
+            PebbleError::Internal(format!("No IMAP config for account {account_id}"))
+        })?;
+        serde_json::from_value(imap_value)
             .map_err(|e| PebbleError::Internal(format!("Failed to deserialize IMAP config: {e}")))
     }
 }
