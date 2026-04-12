@@ -28,7 +28,7 @@ pub struct Store {
 impl Store {
     pub fn open(path: &Path) -> Result<Self> {
         let write_manager = SqliteConnectionManager::file(path).with_init(|conn| {
-            conn.execute_batch("PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;")?;
+            conn.execute_batch("PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000; PRAGMA synchronous=NORMAL;")?;
             Ok(())
         });
         let write_pool = Pool::builder()
@@ -37,7 +37,7 @@ impl Store {
             .map_err(|e| PebbleError::Storage(format!("Failed to create write pool: {e}")))?;
 
         let read_manager = SqliteConnectionManager::file(path).with_init(|conn| {
-            conn.execute_batch("PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;")?;
+            conn.execute_batch("PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000; PRAGMA synchronous=NORMAL;")?;
             Ok(())
         });
         let read_pool = Pool::builder()
@@ -68,7 +68,7 @@ impl Store {
         let write_manager = SqliteConnectionManager::file(&db_name)
             .with_flags(flags)
             .with_init(|conn| {
-                conn.execute_batch("PRAGMA foreign_keys=ON;")?;
+                conn.execute_batch("PRAGMA foreign_keys=ON; PRAGMA synchronous=NORMAL;")?;
                 Ok(())
             });
         let write_pool = Pool::builder()
@@ -79,7 +79,7 @@ impl Store {
         let read_manager = SqliteConnectionManager::file(&db_name)
             .with_flags(flags)
             .with_init(|conn| {
-                conn.execute_batch("PRAGMA foreign_keys=ON;")?;
+                conn.execute_batch("PRAGMA foreign_keys=ON; PRAGMA synchronous=NORMAL;")?;
                 Ok(())
             });
         let read_pool = Pool::builder()
