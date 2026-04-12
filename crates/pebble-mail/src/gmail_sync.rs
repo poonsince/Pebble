@@ -174,7 +174,7 @@ impl GmailSyncWorker {
             &self.store,
             &self.attachments_dir,
             &message.id,
-            &attachments,
+            attachments,
         );
 
         if let (Some(mid), Some(tid)) = (&message.message_id_header, &message.thread_id) {

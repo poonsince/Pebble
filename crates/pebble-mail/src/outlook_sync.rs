@@ -10,14 +10,13 @@ use tracing::{info, warn};
 
 use crate::provider::outlook::OutlookProvider;
 use crate::gmail_sync::TokenRefresher;
-use crate::sync::{StoredMessage, SyncConfig, SyncError};
+use crate::sync::{StoredMessage, SyncConfig, SyncError, persist_message_attachments};
 
 /// A sync worker for Outlook accounts using the Microsoft Graph API.
 pub struct OutlookSyncWorker {
     account_id: String,
     provider: Arc<OutlookProvider>,
     store: Arc<Store>,
-    #[allow(dead_code)]
     attachments_dir: PathBuf,
     error_tx: Option<mpsc::UnboundedSender<SyncError>>,
     message_tx: Option<mpsc::UnboundedSender<StoredMessage>>,
@@ -154,7 +153,31 @@ impl OutlookSyncWorker {
                             let folder_ids = vec![folder.id.clone()];
                             if let Err(e) = self.store.insert_message(msg, &folder_ids) {
                                 warn!("Failed to store Outlook message: {e}");
-                            } else if let Some(tx) = &self.message_tx {
+                                continue;
+                            }
+
+                            // Fetch + persist attachments for messages that advertise them.
+                            if msg.has_attachments {
+                                match self.provider.list_message_attachments(&msg.remote_id).await {
+                                    Ok(attachments) if !attachments.is_empty() => {
+                                        persist_message_attachments(
+                                            &self.store,
+                                            &self.attachments_dir,
+                                            &msg.id,
+                                            attachments,
+                                        );
+                                    }
+                                    Ok(_) => {}
+                                    Err(e) => {
+                                        warn!(
+                                            "Failed to fetch Outlook attachments for {}: {e}",
+                                            msg.remote_id
+                                        );
+                                    }
+                                }
+                            }
+
+                            if let Some(tx) = &self.message_tx {
                                 let _ = tx.send(StoredMessage {
                                     message: msg.clone(),
                                     folder_ids,

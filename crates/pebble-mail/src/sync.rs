@@ -88,13 +88,22 @@ pub(crate) fn sanitize_filename(name: &str) -> String {
     trimmed.to_string()
 }
 
+/// Write attachments to disk and record them in the store.
+///
+/// Takes ownership of `attachments` so that each buffer can be freed the
+/// moment it has been flushed — we don't keep every attachment's bytes
+/// live in memory until the whole function returns. Writes use a buffered
+/// writer with 64 KiB chunks so the working set stays bounded.
 pub(crate) fn persist_message_attachments(
     store: &Store,
     attachments_root: &Path,
     message_id: &str,
-    attachments: &[AttachmentData],
+    attachments: Vec<AttachmentData>,
 ) {
-    for att_data in attachments {
+    use std::io::Write;
+    const CHUNK_SIZE: usize = 64 * 1024;
+
+    for att_data in attachments.into_iter() {
         let att_dir = attachments_root.join(message_id);
         if std::fs::create_dir_all(&att_dir).is_err() {
             warn!("Failed to create attachment dir for message {}", message_id);
@@ -108,22 +117,51 @@ pub(crate) fn persist_message_attachments(
         }
 
         let file_path = att_dir.join(&safe_filename);
-        if std::fs::write(&file_path, &att_data.data).is_ok() {
-            let attachment = pebble_core::Attachment {
-                id: new_id(),
-                message_id: message_id.to_string(),
-                filename: att_data.meta.filename.clone(),
-                mime_type: att_data.meta.mime_type.clone(),
-                size: att_data.meta.size as i64,
-                local_path: Some(file_path.to_string_lossy().to_string()),
-                content_id: att_data.meta.content_id.clone(),
-                is_inline: att_data.meta.is_inline,
-            };
-            if let Err(e) = store.insert_attachment(&attachment) {
-                warn!("Failed to store attachment record: {}", e);
+        let file = match std::fs::File::create(&file_path) {
+            Ok(f) => f,
+            Err(e) => {
+                warn!("Failed to create attachment file {}: {}", file_path.display(), e);
+                continue;
             }
-        } else {
-            warn!("Failed to write attachment file: {}", file_path.display());
+        };
+        let mut writer = std::io::BufWriter::with_capacity(CHUNK_SIZE, file);
+
+        let AttachmentData { meta, data } = att_data;
+        let mut write_ok = true;
+        for chunk in data.chunks(CHUNK_SIZE) {
+            if let Err(e) = writer.write_all(chunk) {
+                warn!("Failed to write attachment file {}: {}", file_path.display(), e);
+                write_ok = false;
+                break;
+            }
+        }
+        // Release the attachment buffer as soon as bytes are flushed to the
+        // buffered writer, before we touch the store — callers often invoke us
+        // in a tight loop where peak memory matters.
+        drop(data);
+
+        if !write_ok {
+            let _ = std::fs::remove_file(&file_path);
+            continue;
+        }
+        if let Err(e) = writer.flush() {
+            warn!("Failed to flush attachment file {}: {}", file_path.display(), e);
+            let _ = std::fs::remove_file(&file_path);
+            continue;
+        }
+
+        let attachment = pebble_core::Attachment {
+            id: new_id(),
+            message_id: message_id.to_string(),
+            filename: meta.filename,
+            mime_type: meta.mime_type,
+            size: meta.size as i64,
+            local_path: Some(file_path.to_string_lossy().to_string()),
+            content_id: meta.content_id,
+            is_inline: meta.is_inline,
+        };
+        if let Err(e) = store.insert_attachment(&attachment) {
+            warn!("Failed to store attachment record: {}", e);
         }
     }
 }
@@ -455,7 +493,7 @@ impl SyncWorker {
                         &self.store,
                         &self.attachments_dir,
                         &msg.id,
-                        &parsed.attachments,
+                        parsed.attachments,
                     );
                 }
                 Err(e) => {

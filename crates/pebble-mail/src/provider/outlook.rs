@@ -196,6 +196,28 @@ struct GraphDraftResponse {
     id: String,
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GraphAttachmentItem {
+    #[allow(dead_code)]
+    id: String,
+    name: Option<String>,
+    content_type: Option<String>,
+    size: Option<i64>,
+    #[serde(default)]
+    is_inline: bool,
+    content_id: Option<String>,
+    /// Present only on fileAttachment resources.
+    content_bytes: Option<String>,
+    #[serde(rename = "@odata.type")]
+    odata_type: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct GraphAttachmentList {
+    value: Vec<GraphAttachmentItem>,
+}
+
 // ---------------------------------------------------------------------------
 // OutlookProvider
 // ---------------------------------------------------------------------------
@@ -542,10 +564,11 @@ impl FolderProvider for OutlookProvider {
             .await
             .map_err(|e| PebbleError::Network(format!("Failed to parse folder list: {e}")))?;
 
+        let account_id = &self.account_id;
         Ok(folder_list
             .value
             .iter()
-            .map(graph_folder_to_folder)
+            .map(|gf| graph_folder_to_folder(gf, account_id))
             .collect())
     }
 
@@ -563,6 +586,122 @@ impl FolderProvider for OutlookProvider {
             )));
         }
         Ok(())
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Graph API write-back methods (flags, trash, delete, restore)
+// ---------------------------------------------------------------------------
+
+impl OutlookProvider {
+    /// Update the read status of a message via Graph API.
+    pub async fn update_read_status(&self, remote_id: &str, is_read: bool) -> Result<()> {
+        let url = format!("{GRAPH_API_BASE}/messages/{remote_id}");
+        let body = serde_json::json!({ "isRead": is_read });
+        let resp = self.patch_json(&url, &body).await?;
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let text = resp.text().await.unwrap_or_default();
+            return Err(PebbleError::Network(format!(
+                "Failed to update read status (status {status}): {text}"
+            )));
+        }
+        Ok(())
+    }
+
+    /// Update the flag (starred) status of a message via Graph API.
+    pub async fn update_flag_status(&self, remote_id: &str, is_starred: bool) -> Result<()> {
+        let url = format!("{GRAPH_API_BASE}/messages/{remote_id}");
+        let flag_status = if is_starred { "flagged" } else { "notFlagged" };
+        let body = serde_json::json!({ "flag": { "flagStatus": flag_status } });
+        let resp = self.patch_json(&url, &body).await?;
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let text = resp.text().await.unwrap_or_default();
+            return Err(PebbleError::Network(format!(
+                "Failed to update flag status (status {status}): {text}"
+            )));
+        }
+        Ok(())
+    }
+
+    /// Move a message to the Deleted Items folder (trash) via Graph API.
+    pub async fn trash_message(&self, remote_id: &str) -> Result<()> {
+        self.move_message(remote_id, "deleteditems").await
+    }
+
+    /// Move a message from trash back to inbox via Graph API.
+    pub async fn restore_message(&self, remote_id: &str) -> Result<()> {
+        self.move_message(remote_id, "inbox").await
+    }
+
+    /// Permanently delete a message via Graph API.
+    pub async fn delete_message_permanently(&self, remote_id: &str) -> Result<()> {
+        let url = format!("{GRAPH_API_BASE}/messages/{remote_id}");
+        let resp = self.delete(&url).await?;
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let text = resp.text().await.unwrap_or_default();
+            return Err(PebbleError::Network(format!(
+                "Failed to permanently delete message (status {status}): {text}"
+            )));
+        }
+        Ok(())
+    }
+
+    /// Fetch all file attachments for a message via Graph API.
+    /// Returns parsed `AttachmentData` suitable for `persist_message_attachments`.
+    /// Inline and non-file attachments (itemAttachment, referenceAttachment) are skipped.
+    pub async fn list_message_attachments(
+        &self,
+        remote_id: &str,
+    ) -> Result<Vec<crate::parser::AttachmentData>> {
+        let url = format!("{GRAPH_API_BASE}/messages/{remote_id}/attachments");
+        let resp = self.get(&url).await?;
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let text = resp.text().await.unwrap_or_default();
+            return Err(PebbleError::Network(format!(
+                "Failed to list attachments (status {status}): {text}"
+            )));
+        }
+        let list: GraphAttachmentList = resp
+            .json()
+            .await
+            .map_err(|e| PebbleError::Network(format!("Failed to parse attachment list: {e}")))?;
+
+        let mut out = Vec::new();
+        for item in list.value {
+            // Only fileAttachment carries inline content bytes; skip others for now.
+            let is_file = item
+                .odata_type
+                .as_deref()
+                .map(|t| t.eq_ignore_ascii_case("#microsoft.graph.fileAttachment"))
+                .unwrap_or(false);
+            if !is_file {
+                continue;
+            }
+            let Some(b64) = item.content_bytes else {
+                continue;
+            };
+            let data = base64_standard_decode_outlook(&b64);
+            let filename = item.name.unwrap_or_else(|| "attachment".to_string());
+            let mime_type = item
+                .content_type
+                .unwrap_or_else(|| "application/octet-stream".to_string());
+            let size = item.size.unwrap_or(data.len() as i64).max(0) as usize;
+            out.push(crate::parser::AttachmentData {
+                meta: crate::parser::AttachmentMeta {
+                    filename,
+                    mime_type,
+                    size,
+                    content_id: item.content_id,
+                    is_inline: item.is_inline,
+                },
+                data,
+            });
+        }
+        Ok(out)
     }
 }
 
@@ -775,6 +914,41 @@ fn base64_standard_encode_outlook(data: &[u8]) -> String {
     out
 }
 
+fn base64_standard_decode_outlook(input: &str) -> Vec<u8> {
+    // Standard base64 alphabet decoder. Skips whitespace and padding.
+    let bytes: Vec<u8> = input
+        .bytes()
+        .filter(|b| !b.is_ascii_whitespace() && *b != b'=')
+        .map(|b| match b {
+            b'A'..=b'Z' => b - b'A',
+            b'a'..=b'z' => b - b'a' + 26,
+            b'0'..=b'9' => b - b'0' + 52,
+            b'+' => 62,
+            b'/' => 63,
+            _ => 0,
+        })
+        .collect();
+
+    let mut out = Vec::with_capacity(bytes.len() * 3 / 4);
+    for chunk in bytes.chunks(4) {
+        if chunk.len() < 2 {
+            break;
+        }
+        let n = ((chunk[0] as u32) << 18)
+            | ((chunk[1] as u32) << 12)
+            | ((chunk.get(2).copied().unwrap_or(0) as u32) << 6)
+            | (chunk.get(3).copied().unwrap_or(0) as u32);
+        out.push((n >> 16) as u8);
+        if chunk.len() >= 3 {
+            out.push((n >> 8) as u8);
+        }
+        if chunk.len() >= 4 {
+            out.push(n as u8);
+        }
+    }
+    out
+}
+
 fn guess_outlook_mime(filename: &str) -> &'static str {
     let ext = filename.rsplit('.').next().unwrap_or("").to_lowercase();
     match ext.as_str() {
@@ -808,7 +982,7 @@ fn well_known_name_to_role(name: &str) -> Option<FolderRole> {
     }
 }
 
-fn graph_folder_to_folder(gf: &GraphFolder) -> Folder {
+fn graph_folder_to_folder(gf: &GraphFolder, account_id: &str) -> Folder {
     let role = gf
         .well_known_name
         .as_deref()
@@ -817,7 +991,7 @@ fn graph_folder_to_folder(gf: &GraphFolder) -> Folder {
     let sort_order = crate::imap::folder_sort_order(&role);
     Folder {
         id: new_id(),
-        account_id: String::new(),
+        account_id: account_id.to_string(),
         remote_id: gf.id.clone(),
         name: gf.display_name.clone().unwrap_or_default(),
         folder_type: FolderType::Folder,
@@ -1054,12 +1228,13 @@ mod tests {
             child_folder_count: Some(0),
             well_known_name: Some("inbox".to_string()),
         };
-        let folder = graph_folder_to_folder(&gf);
+        let folder = graph_folder_to_folder(&gf, "test-account-id");
         assert_eq!(folder.role, Some(FolderRole::Inbox));
         assert_eq!(folder.folder_type, FolderType::Folder);
         assert!(folder.is_system);
         assert_eq!(folder.remote_id, "AAMkAD");
         assert_eq!(folder.name, "Inbox");
+        assert_eq!(folder.account_id, "test-account-id");
     }
 
     #[test]
@@ -1071,10 +1246,11 @@ mod tests {
             child_folder_count: Some(2),
             well_known_name: None,
         };
-        let folder = graph_folder_to_folder(&gf);
+        let folder = graph_folder_to_folder(&gf, "acct-123");
         assert_eq!(folder.role, None);
         assert!(!folder.is_system);
         assert_eq!(folder.name, "My Folder");
+        assert_eq!(folder.account_id, "acct-123");
     }
 
     #[test]
