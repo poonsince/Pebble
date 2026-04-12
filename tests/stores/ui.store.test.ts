@@ -3,8 +3,6 @@ import { useUIStore } from "../../src/stores/ui.store";
 
 describe("UIStore", () => {
   beforeEach(() => {
-    vi.stubGlobal("confirm", vi.fn(() => true));
-
     useUIStore.setState({
       sidebarCollapsed: false,
       activeView: "inbox",
@@ -17,6 +15,8 @@ describe("UIStore", () => {
       composeMode: null,
       composeReplyTo: null,
       composeDirty: false,
+      showComposeLeaveConfirm: false,
+      pendingView: null,
       pollInterval: 15,
       searchQuery: "",
     });
@@ -48,10 +48,7 @@ describe("UIStore", () => {
     expect(useUIStore.getState().activeView).toBe("settings");
   });
 
-  it("keeps the user on compose when discard is rejected via setActiveView", () => {
-    const confirmSpy = vi.fn(() => false);
-    vi.stubGlobal("confirm", confirmSpy);
-
+  it("keeps the user on compose when dirty and shows confirmation", () => {
     useUIStore.setState({
       activeView: "compose",
       previousView: "inbox",
@@ -62,16 +59,15 @@ describe("UIStore", () => {
     useUIStore.getState().setActiveView("search");
 
     const state = useUIStore.getState();
-    expect(confirmSpy).toHaveBeenCalledOnce();
+    // Should stay on compose and show confirmation dialog
     expect(state.activeView).toBe("compose");
     expect(state.composeMode).toBe("new");
     expect(state.composeDirty).toBe(true);
+    expect(state.showComposeLeaveConfirm).toBe(true);
+    expect(state.pendingView).toBe("search");
   });
 
   it("closeCompose respects unsaved-draft protection", () => {
-    const confirmSpy = vi.fn(() => false);
-    vi.stubGlobal("confirm", confirmSpy);
-
     useUIStore.setState({
       activeView: "compose",
       previousView: "kanban",
@@ -82,32 +78,71 @@ describe("UIStore", () => {
     useUIStore.getState().closeCompose();
 
     const state = useUIStore.getState();
-    expect(confirmSpy).toHaveBeenCalledOnce();
+    // Should stay on compose and show confirmation dialog
     expect(state.activeView).toBe("compose");
     expect(state.composeMode).toBe("reply");
     expect(state.composeDirty).toBe(true);
+    expect(state.showComposeLeaveConfirm).toBe(true);
   });
 
-  it("successful close clears compose state", () => {
-    const confirmSpy = vi.fn(() => true);
-    vi.stubGlobal("confirm", confirmSpy);
-
+  it("confirmCloseCompose navigates away and clears compose state", () => {
     useUIStore.setState({
       activeView: "compose",
       previousView: "kanban",
       composeMode: "forward",
       composeReplyTo: { id: "message-1" } as never,
       composeDirty: true,
+      showComposeLeaveConfirm: true,
+      pendingView: null,
     });
 
-    useUIStore.getState().closeCompose();
+    useUIStore.getState().confirmCloseCompose();
 
     const state = useUIStore.getState();
-    expect(confirmSpy).toHaveBeenCalledOnce();
     expect(state.activeView).toBe("kanban");
     expect(state.composeMode).toBe(null);
     expect(state.composeReplyTo).toBe(null);
     expect(state.composeDirty).toBe(false);
+    expect(state.showComposeLeaveConfirm).toBe(false);
+  });
+
+  it("confirmCloseCompose navigates to pendingView when set", () => {
+    useUIStore.setState({
+      activeView: "compose",
+      previousView: "inbox",
+      composeMode: "new",
+      composeDirty: true,
+      showComposeLeaveConfirm: true,
+      pendingView: "search",
+    });
+
+    useUIStore.getState().confirmCloseCompose();
+
+    const state = useUIStore.getState();
+    expect(state.activeView).toBe("search");
+    expect(state.composeMode).toBe(null);
+    expect(state.showComposeLeaveConfirm).toBe(false);
+    expect(state.pendingView).toBe(null);
+  });
+
+  it("cancelCloseCompose clears confirmation state", () => {
+    useUIStore.setState({
+      activeView: "compose",
+      previousView: "inbox",
+      composeMode: "new",
+      composeDirty: true,
+      showComposeLeaveConfirm: true,
+      pendingView: "kanban",
+    });
+
+    useUIStore.getState().cancelCloseCompose();
+
+    const state = useUIStore.getState();
+    expect(state.activeView).toBe("compose");
+    expect(state.composeMode).toBe("new");
+    expect(state.composeDirty).toBe(true);
+    expect(state.showComposeLeaveConfirm).toBe(false);
+    expect(state.pendingView).toBe(null);
   });
 
   it("should set theme", () => {

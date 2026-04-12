@@ -1,111 +1,58 @@
 import { invoke } from "@tauri-apps/api/core";
-import { retryQueue } from "./retry-queue";
 
-// ─── Types ────────────────────────────────────────────────────────────────────
+// Re-export all IPC types so existing `import { Foo } from "@/lib/api"` keeps working.
+export type {
+  Account,
+  AddAccountRequest,
+  AdvancedSearchQuery,
+  Attachment,
+  BackupPreview,
+  ConnectionSecurity,
+  EmailAddress,
+  Folder,
+  KanbanCard,
+  KanbanColumnType,
+  KnownContact,
+  Label,
+  Message,
+  MessageSummary,
+  PrivacyMode,
+  RenderedHtml,
+  Rule,
+  SearchHit,
+  SnoozedMessage,
+  ThreadSummary,
+  TranslateConfig,
+  TranslateResult,
+  TrustedSender,
+} from "./ipc-types";
 
-export interface Account {
-  id: string;
-  email: string;
-  display_name: string;
-  provider: "imap" | "gmail" | "outlook";
-  created_at: number;
-  updated_at: number;
-}
+import type {
+  Account,
+  AddAccountRequest,
+  AdvancedSearchQuery,
+  Attachment,
+  BackupPreview,
+  ConnectionSecurity,
+  Folder,
+  KanbanCard,
+  KanbanColumnType,
+  KnownContact,
+  Label,
+  Message,
+  MessageSummary,
+  PrivacyMode,
+  RenderedHtml,
+  Rule,
+  SearchHit,
+  SnoozedMessage,
+  ThreadSummary,
+  TranslateConfig,
+  TranslateResult,
+  TrustedSender,
+} from "./ipc-types";
 
-export interface Folder {
-  id: string;
-  account_id: string;
-  remote_id: string;
-  name: string;
-  folder_type: "folder" | "label" | "category";
-  role: "inbox" | "sent" | "drafts" | "trash" | "archive" | "spam" | null;
-  parent_id: string | null;
-  color: string | null;
-  is_system: boolean;
-  sort_order: number;
-}
-
-export interface EmailAddress {
-  name: string | null;
-  address: string;
-}
-
-/** Lightweight message data for list views (no body fields). */
-export interface MessageSummary {
-  id: string;
-  account_id: string;
-  remote_id: string;
-  message_id_header: string | null;
-  in_reply_to: string | null;
-  references_header: string | null;
-  thread_id: string | null;
-  subject: string;
-  snippet: string;
-  from_address: string;
-  from_name: string;
-  to_list: EmailAddress[];
-  cc_list: EmailAddress[];
-  bcc_list: EmailAddress[];
-  has_attachments: boolean;
-  is_read: boolean;
-  is_starred: boolean;
-  is_draft: boolean;
-  date: number;
-  remote_version: string | null;
-  is_deleted: boolean;
-  deleted_at: number | null;
-  created_at: number;
-  updated_at: number;
-}
-
-/** Full message including body content. */
-export interface Message extends MessageSummary {
-  body_text: string;
-  body_html_raw: string;
-}
-
-export interface RenderedHtml {
-  html: string;
-  trackers_blocked: { domain: string; tracker_type: string }[];
-  images_blocked: number;
-}
-
-export interface SearchHit {
-  message_id: string;
-  score: number;
-  snippet: string;
-  subject?: string;
-  from_address?: string;
-  date?: number;
-}
-
-export type PrivacyMode = "Strict" | { TrustSender: string } | "LoadOnce" | "Off";
-
-export type ConnectionSecurity = "tls" | "starttls" | "plain";
-
-export interface AddAccountRequest {
-  email: string;
-  display_name: string;
-  provider: string;
-  imap_host: string;
-  imap_port: number;
-  smtp_host: string;
-  smtp_port: number;
-  username: string;
-  password: string;
-  imap_security: ConnectionSecurity;
-  smtp_security: ConnectionSecurity;
-  proxy_host?: string;
-  proxy_port?: number;
-}
-
-// ─── Retry Wrapper ───────────────────────────────────────────────────────────
-
-export function withRetry(fn: () => Promise<void>): void {
-  retryQueue.enqueue(fn);
-}
-
-// ─── API Functions ────────────────────────────────────────────────────────────
+// ─── Account API ─────────────────────────────────────────────────────────────
 
 export async function healthCheck(): Promise<string> {
   return invoke<string>("health_check");
@@ -170,9 +117,13 @@ export async function deleteAccount(accountId: string): Promise<void> {
   return invoke<void>("delete_account", { accountId });
 }
 
+// ─── Folder API ──────────────────────────────────────────────────────────────
+
 export async function listFolders(accountId: string): Promise<Folder[]> {
   return invoke<Folder[]>("list_folders", { accountId });
 }
+
+// ─── Message API ─────────────────────────────────────────────────────────────
 
 export async function listMessages(
   folderId: string,
@@ -249,14 +200,7 @@ export async function emptyTrash(accountId: string): Promise<number> {
   return invoke<number>("empty_trash", { accountId });
 }
 
-// ─── Trusted Senders ────────────────────────────────────────────────────────
-
-export interface TrustedSender {
-  account_id: string;
-  email: string;
-  trust_type: "images" | "all";
-  created_at: number;
-}
+// ─── Trusted Senders API ────────────────────────────────────────────────────
 
 export async function listTrustedSenders(accountId: string): Promise<TrustedSender[]> {
   return invoke<TrustedSender[]>("list_trusted_senders", { accountId });
@@ -266,24 +210,21 @@ export async function removeTrustedSender(accountId: string, email: string): Pro
   return invoke<void>("remove_trusted_sender", { accountId, email });
 }
 
+export async function trustSender(accountId: string, email: string, trustType: "images" | "all"): Promise<void> {
+  return invoke<void>("trust_sender", { accountId, email, trustType });
+}
+
+export async function isTrustedSender(accountId: string, email: string): Promise<boolean> {
+  return invoke<boolean>("is_trusted_sender", { accountId, email });
+}
+
+// ─── Search API ──────────────────────────────────────────────────────────────
+
 export async function searchMessages(
   query: string,
   limit?: number,
 ): Promise<SearchHit[]> {
   return invoke<SearchHit[]>("search_messages", { query, limit });
-}
-
-// ─── Advanced Search ─────────────────────────────────────────────────────────
-
-export interface AdvancedSearchQuery {
-  text?: string;
-  from?: string;
-  to?: string;
-  subject?: string;
-  dateFrom?: number;
-  dateTo?: number;
-  hasAttachment?: boolean;
-  folderId?: string;
 }
 
 export async function advancedSearch(
@@ -293,24 +234,14 @@ export async function advancedSearch(
   return invoke<SearchHit[]>("advanced_search", { query, limit });
 }
 
+// ─── Sync API ────────────────────────────────────────────────────────────────
+
 export async function startSync(accountId: string, pollIntervalSecs?: number): Promise<string> {
   return invoke<string>("start_sync", { accountId, pollIntervalSecs: pollIntervalSecs ?? null });
 }
 
 export async function stopSync(accountId: string): Promise<void> {
   return invoke<void>("stop_sync", { accountId });
-}
-
-// ─── Attachment Types ─────────────────────────────────────────────────────────
-
-export interface Attachment {
-  id: string;
-  message_id: string;
-  filename: string;
-  mime_type: string;
-  size: number;
-  content_id: string | null;
-  is_inline: boolean;
 }
 
 // ─── Attachment API ──────────────────────────────────────────────────────────
@@ -327,41 +258,7 @@ export async function downloadAttachment(attachmentId: string, saveTo: string): 
   return invoke<void>("download_attachment", { attachmentId, saveTo });
 }
 
-// ─── Kanban Types ─────────────────────────────────────────────────────────────
-
-export type KanbanColumnType = "todo" | "waiting" | "done";
-
-export interface KanbanCard {
-  message_id: string;
-  column: KanbanColumnType;
-  position: number;
-  created_at: number;
-  updated_at: number;
-}
-
-// ─── Snooze Types ─────────────────────────────────────────────────────────────
-
-export interface SnoozedMessage {
-  message_id: string;
-  snoozed_at: number;
-  unsnoozed_at: number;
-  return_to: string;
-}
-
-// ─── Rule Types ───────────────────────────────────────────────────────────────
-
-export interface Rule {
-  id: string;
-  name: string;
-  priority: number;
-  conditions: string;
-  actions: string;
-  is_enabled: boolean;
-  created_at: number;
-  updated_at: number;
-}
-
-// ─── Kanban API ───────────────────────────────────────────────────────────────
+// ─── Kanban API ──────────────────────────────────────────────────────────────
 
 export async function moveToKanban(messageId: string, column: KanbanColumnType, position?: number): Promise<void> {
   return invoke<void>("move_to_kanban", { messageId, column, position });
@@ -375,7 +272,7 @@ export async function removeFromKanban(messageId: string): Promise<void> {
   return invoke<void>("remove_from_kanban", { messageId });
 }
 
-// ─── Snooze API ───────────────────────────────────────────────────────────────
+// ─── Snooze API ──────────────────────────────────────────────────────────────
 
 export async function snoozeMessage(messageId: string, until: number, returnTo: string): Promise<void> {
   return invoke<void>("snooze_message", { messageId, until, returnTo });
@@ -389,7 +286,7 @@ export async function listSnoozed(): Promise<SnoozedMessage[]> {
   return invoke<SnoozedMessage[]>("list_snoozed");
 }
 
-// ─── Rules API ────────────────────────────────────────────────────────────────
+// ─── Rules API ───────────────────────────────────────────────────────────────
 
 export async function createRule(name: string, priority: number, conditions: string, actions: string): Promise<Rule> {
   return invoke<Rule>("create_rule", { name, priority, conditions, actions });
@@ -407,7 +304,7 @@ export async function deleteRule(ruleId: string): Promise<void> {
   return invoke<void>("delete_rule", { ruleId });
 }
 
-// ─── Compose API ──────────────────────────────────────────────────────────────
+// ─── Compose API ─────────────────────────────────────────────────────────────
 
 export async function sendEmail(
   accountId: string,
@@ -425,7 +322,7 @@ export async function sendEmail(
   });
 }
 
-// ─── Batch Operations ────────────────────────────────────────────────────────
+// ─── Batch Operations ───────────────────────────────────────────────────────
 
 export async function batchArchive(messageIds: string[]): Promise<number> {
   return invoke<number>("batch_archive", { messageIds });
@@ -439,31 +336,7 @@ export async function batchMarkRead(messageIds: string[], isRead: boolean): Prom
   return invoke<number>("batch_mark_read", { messageIds, isRead });
 }
 
-// ─── Trusted Senders API ─────────────────────────────────────────────────────
-
-export async function trustSender(accountId: string, email: string, trustType: "images" | "all"): Promise<void> {
-  return invoke<void>("trust_sender", { accountId, email, trustType });
-}
-
-export async function isTrustedSender(accountId: string, email: string): Promise<boolean> {
-  return invoke<boolean>("is_trusted_sender", { accountId, email });
-}
-
 // ─── Translate API ───────────────────────────────────────────────────────────
-
-export interface TranslateConfig {
-  id: string;
-  provider_type: string;
-  config: string;
-  is_enabled: boolean;
-  created_at: number;
-  updated_at: number;
-}
-
-export interface TranslateResult {
-  translated: string;
-  segments: { source: string; target: string }[];
-}
 
 export async function translateText(text: string, fromLang: string, toLang: string): Promise<TranslateResult> {
   return invoke<TranslateResult>("translate_text", { text, fromLang, toLang });
@@ -481,19 +354,7 @@ export async function testTranslateConnection(config: string): Promise<string> {
   return invoke<string>("test_translate_connection", { config });
 }
 
-// ─── Thread API ─────────────────────────────────────────────────────────────
-
-export interface ThreadSummary {
-  thread_id: string;
-  subject: string;
-  snippet: string;
-  last_date: number;
-  message_count: number;
-  unread_count: number;
-  is_starred: boolean;
-  participants: string[];
-  has_attachments: boolean;
-}
+// ─── Thread API ──────────────────────────────────────────────────────────────
 
 export async function listThreads(folderId: string, limit: number, offset: number): Promise<ThreadSummary[]> {
   return invoke<ThreadSummary[]>("list_threads", { folderId, limit, offset });
@@ -503,15 +364,7 @@ export async function listThreadMessages(threadId: string): Promise<Message[]> {
   return invoke<Message[]>("list_thread_messages", { threadId });
 }
 
-// ─── Labels API ─────────────────────────────────────────────────────────────
-
-export interface Label {
-  id: string;
-  name: string;
-  color: string;
-  is_system: boolean;
-  rule_id: string | null;
-}
+// ─── Labels API ──────────────────────────────────────────────────────────────
 
 export async function getMessageLabels(messageId: string): Promise<Label[]> {
   return invoke<Label[]>("get_message_labels", { messageId });
@@ -533,7 +386,7 @@ export async function listLabels(): Promise<Label[]> {
   return invoke<Label[]>("list_labels");
 }
 
-// ─── Cloud Sync API ────────────────────────────────────────────────────────
+// ─── Cloud Sync API ─────────────────────────────────────────────────────────
 
 export async function testWebdavConnection(url: string, username: string, password: string): Promise<string> {
   return invoke<string>("test_webdav_connection", { url, username, password });
@@ -543,16 +396,15 @@ export async function backupToWebdav(url: string, username: string, password: st
   return invoke<string>("backup_to_webdav", { url, username, password });
 }
 
+export async function previewWebdavBackup(url: string, username: string, password: string): Promise<BackupPreview> {
+  return invoke<BackupPreview>("preview_webdav_backup", { url, username, password });
+}
+
 export async function restoreFromWebdav(url: string, username: string, password: string): Promise<string> {
   return invoke<string>("restore_from_webdav", { url, username, password });
 }
 
-// ─── Contacts API ──────────────────────────────────────────────────────────
-
-export interface KnownContact {
-  name: string | null;
-  address: string;
-}
+// ─── Contacts API ────────────────────────────────────────────────────────────
 
 export async function searchContacts(
   accountId: string,

@@ -45,6 +45,8 @@ interface UIState {
   composeMode: "new" | "reply" | "reply-all" | "forward" | null;
   composeReplyTo: Message | null;
   composeDirty: boolean;
+  showComposeLeaveConfirm: boolean;
+  pendingView: ActiveView | null;
   setComposeDirty: (dirty: boolean) => void;
   toggleSidebar: () => void;
   setActiveView: (view: ActiveView) => void;
@@ -55,6 +57,8 @@ interface UIState {
   setLastMailError: (error: string | null) => void;
   openCompose: (mode: "new" | "reply" | "reply-all" | "forward", replyTo?: Message | null) => void;
   closeCompose: () => void;
+  confirmCloseCompose: () => void;
+  cancelCloseCompose: () => void;
   pollInterval: number;
   setPollInterval: (secs: number) => void;
   searchQuery: string;
@@ -73,6 +77,8 @@ export const useUIStore = create<UIState>((set) => ({
   composeMode: null,
   composeReplyTo: null,
   composeDirty: false,
+  showComposeLeaveConfirm: false,
+  pendingView: null,
   setComposeDirty: (dirty) => set({ composeDirty: dirty }),
   toggleSidebar: () =>
     set((state) => ({ sidebarCollapsed: !state.sidebarCollapsed })),
@@ -83,6 +89,10 @@ export const useUIStore = create<UIState>((set) => ({
     }
 
     if (state.activeView === "compose" && view !== "compose") {
+      if (state.composeDirty) {
+        set({ showComposeLeaveConfirm: true, pendingView: view });
+        return;
+      }
       set({ activeView: view, ...getComposeResetState() });
       return;
     }
@@ -116,11 +126,27 @@ export const useUIStore = create<UIState>((set) => ({
       return;
     }
 
+    if (state.composeDirty) {
+      set({ showComposeLeaveConfirm: true, pendingView: null });
+      return;
+    }
+
     set((current) => ({
       activeView: current.previousView,
       ...getComposeResetState(),
     }));
   },
+  confirmCloseCompose: () => {
+    const state = useUIStore.getState();
+    const targetView = state.pendingView ?? state.previousView;
+    set({
+      activeView: targetView,
+      showComposeLeaveConfirm: false,
+      pendingView: null,
+      ...getComposeResetState(),
+    });
+  },
+  cancelCloseCompose: () => set({ showComposeLeaveConfirm: false, pendingView: null }),
   pollInterval: Number(localStorage.getItem("pebble-poll-interval")) || 15,
   setPollInterval: (secs) => {
     localStorage.setItem("pebble-poll-interval", String(secs));
