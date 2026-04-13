@@ -63,13 +63,17 @@ pub async fn batch_archive(
             .is_some_and(|af| !af.remote_id.starts_with("__local_"));
         let needs_connection = matches!(provider_type, ProviderType::Gmail) || has_remote_archive;
 
+        // Track which messages succeeded remotely for this account group
+        let mut remote_succeeded: Vec<String> = Vec::new();
+
         if needs_connection {
             if let Ok(conn) = ConnectedProvider::connect(&state, account_id, provider_type).await {
                 match &conn {
                     ConnectedProvider::Gmail(provider) => {
                         for msg in messages {
-                            if let Err(e) = provider.modify_labels(&msg.remote_id, &[], &["INBOX".to_string()]).await {
-                                warn!("Gmail batch archive failed for {}: {e}", msg.id);
+                            match provider.modify_labels(&msg.remote_id, &[], &["INBOX".to_string()]).await {
+                                Ok(_) => remote_succeeded.push(msg.id.clone()),
+                                Err(e) => warn!("Gmail batch archive failed for {}: {e}", msg.id),
                             }
                         }
                     }
@@ -78,8 +82,9 @@ pub async fn batch_archive(
                             continue;
                         };
                         for msg in messages {
-                            if let Err(e) = provider.move_message(&msg.remote_id, &af.remote_id).await {
-                                warn!("Outlook batch archive failed for {}: {e}", msg.id);
+                            match provider.move_message(&msg.remote_id, &af.remote_id).await {
+                                Ok(_) => remote_succeeded.push(msg.id.clone()),
+                                Err(e) => warn!("Outlook batch archive failed for {}: {e}", msg.id),
                             }
                         }
                     }
@@ -90,8 +95,9 @@ pub async fn batch_archive(
                         for msg in messages {
                             if let Ok(uid) = parse_imap_uid(&msg.remote_id) {
                                 if let Ok(src) = find_message_folder(&state, &msg.id, account_id) {
-                                    if let Err(e) = imap.move_message(&src.remote_id, uid, &af.remote_id).await {
-                                        warn!("IMAP batch archive failed for {}: {e}", msg.id);
+                                    match imap.move_message(&src.remote_id, uid, &af.remote_id).await {
+                                        Ok(_) => remote_succeeded.push(msg.id.clone()),
+                                        Err(e) => warn!("IMAP batch archive failed for {}: {e}", msg.id),
                                     }
                                 }
                             }
@@ -100,20 +106,30 @@ pub async fn batch_archive(
                 }
                 conn.disconnect().await;
             }
+            // If connection failed, remote_succeeded stays empty — skip local update
+        } else {
+            // No remote target needed; all messages succeed locally
+            for msg in messages {
+                remote_succeeded.push(msg.id.clone());
+            }
         }
 
-        // Local store update
-        for msg in messages {
-            let result = match &archive_folder {
-                Some(af) => state.store.move_message_to_folder(&msg.id, &af.id),
-                None => state.store.soft_delete_message(&msg.id),
-            };
-            match result {
-                Ok(()) => {
-                    success_count += 1;
-                    archived_ids.push(msg.id.clone());
+        // Local store update — only for messages that succeeded remotely
+        // Build a lookup map so we can find each message's archive_folder logic
+        let msg_map: HashMap<&str, &Message> = messages.iter().map(|m| (m.id.as_str(), m)).collect();
+        for id in &remote_succeeded {
+            if let Some(msg) = msg_map.get(id.as_str()) {
+                let result = match &archive_folder {
+                    Some(af) => state.store.move_message_to_folder(&msg.id, &af.id),
+                    None => state.store.soft_delete_message(&msg.id),
+                };
+                match result {
+                    Ok(()) => {
+                        success_count += 1;
+                        archived_ids.push(msg.id.clone());
+                    }
+                    Err(e) => warn!("Failed to archive message {}: {e}", msg.id),
                 }
-                Err(e) => warn!("Failed to archive message {}: {e}", msg.id),
             }
         }
     }
@@ -240,6 +256,9 @@ pub async fn batch_mark_read(
     .await
     .map_err(|e| PebbleError::Internal(format!("Task join error: {e}")))??;
 
+    // Track which messages were successfully updated remotely
+    let mut synced_ids: Vec<String> = Vec::new();
+
     // Remote sync — connect once per account, operate, disconnect
     for (account_id, (provider_type, messages)) in &groups {
         if let Ok(conn) = ConnectedProvider::connect(&state, account_id, provider_type).await {
@@ -251,15 +270,17 @@ pub async fn batch_mark_read(
                         (vec!["UNREAD".to_string()], vec![])
                     };
                     for msg in messages {
-                        if let Err(e) = provider.modify_labels(&msg.remote_id, &add, &remove).await {
-                            warn!("Gmail batch mark_read failed for {}: {e}", msg.id);
+                        match provider.modify_labels(&msg.remote_id, &add, &remove).await {
+                            Ok(_) => synced_ids.push(msg.id.clone()),
+                            Err(e) => warn!("Gmail batch mark_read failed for {}: {e}", msg.id),
                         }
                     }
                 }
                 ConnectedProvider::Outlook(provider) => {
                     for msg in messages {
-                        if let Err(e) = provider.update_read_status(&msg.remote_id, is_read).await {
-                            warn!("Outlook batch mark_read failed for {}: {e}", msg.id);
+                        match provider.update_read_status(&msg.remote_id, is_read).await {
+                            Ok(_) => synced_ids.push(msg.id.clone()),
+                            Err(e) => warn!("Outlook batch mark_read failed for {}: {e}", msg.id),
                         }
                     }
                 }
@@ -267,8 +288,9 @@ pub async fn batch_mark_read(
                     for msg in messages {
                         if let Ok(uid) = parse_imap_uid(&msg.remote_id) {
                             if let Ok(folder) = find_message_folder(&state, &msg.id, account_id) {
-                                if let Err(e) = imap.set_flags(&folder.remote_id, uid, Some(is_read), None).await {
-                                    warn!("IMAP batch mark_read failed for {}: {e}", msg.id);
+                                match imap.set_flags(&folder.remote_id, uid, Some(is_read), None).await {
+                                    Ok(_) => synced_ids.push(msg.id.clone()),
+                                    Err(e) => warn!("IMAP batch mark_read failed for {}: {e}", msg.id),
                                 }
                             }
                         }
@@ -277,15 +299,23 @@ pub async fn batch_mark_read(
             }
             conn.disconnect().await;
         }
+        // If connection failed, those messages are not added to synced_ids
     }
 
-    // Local bulk flag update
-    let changes: Vec<(String, Option<bool>, Option<bool>)> = message_ids
+    // If no remote syncs succeeded at all, fall back to updating all (true offline mode)
+    let ids_to_update = if synced_ids.is_empty() {
+        message_ids.as_slice()
+    } else {
+        synced_ids.as_slice()
+    };
+
+    // Local bulk flag update — only for messages that succeeded remotely (or all if offline)
+    let changes: Vec<(String, Option<bool>, Option<bool>)> = ids_to_update
         .iter()
         .map(|id| (id.clone(), Some(is_read), None))
         .collect();
     state.store.bulk_update_flags(&changes)?;
-    let success_count = message_ids.len() as u32;
+    let success_count = ids_to_update.len() as u32;
 
     info!(
         "Batch mark_read({}): {}/{} messages updated",
@@ -317,6 +347,9 @@ pub async fn batch_star(
     .await
     .map_err(|e| PebbleError::Internal(format!("Task join error: {e}")))??;
 
+    // Track which messages were successfully updated remotely
+    let mut synced_ids: Vec<String> = Vec::new();
+
     // Remote sync — connect once per account, operate, disconnect
     for (account_id, (provider_type, messages)) in &groups {
         if let Ok(conn) = ConnectedProvider::connect(&state, account_id, provider_type).await {
@@ -328,15 +361,17 @@ pub async fn batch_star(
                         (vec![], vec!["STARRED".to_string()])
                     };
                     for msg in messages {
-                        if let Err(e) = provider.modify_labels(&msg.remote_id, &add, &remove).await {
-                            warn!("Gmail batch star failed for {}: {e}", msg.id);
+                        match provider.modify_labels(&msg.remote_id, &add, &remove).await {
+                            Ok(_) => synced_ids.push(msg.id.clone()),
+                            Err(e) => warn!("Gmail batch star failed for {}: {e}", msg.id),
                         }
                     }
                 }
                 ConnectedProvider::Outlook(provider) => {
                     for msg in messages {
-                        if let Err(e) = provider.update_flag_status(&msg.remote_id, starred).await {
-                            warn!("Outlook batch star failed for {}: {e}", msg.id);
+                        match provider.update_flag_status(&msg.remote_id, starred).await {
+                            Ok(_) => synced_ids.push(msg.id.clone()),
+                            Err(e) => warn!("Outlook batch star failed for {}: {e}", msg.id),
                         }
                     }
                 }
@@ -344,8 +379,9 @@ pub async fn batch_star(
                     for msg in messages {
                         if let Ok(uid) = parse_imap_uid(&msg.remote_id) {
                             if let Ok(folder) = find_message_folder(&state, &msg.id, account_id) {
-                                if let Err(e) = imap.set_flags(&folder.remote_id, uid, None, Some(starred)).await {
-                                    warn!("IMAP batch star failed for {}: {e}", msg.id);
+                                match imap.set_flags(&folder.remote_id, uid, None, Some(starred)).await {
+                                    Ok(_) => synced_ids.push(msg.id.clone()),
+                                    Err(e) => warn!("IMAP batch star failed for {}: {e}", msg.id),
                                 }
                             }
                         }
@@ -354,15 +390,23 @@ pub async fn batch_star(
             }
             conn.disconnect().await;
         }
+        // If connection failed, those messages are not added to synced_ids
     }
 
-    // Local bulk flag update
-    let changes: Vec<(String, Option<bool>, Option<bool>)> = message_ids
+    // If no remote syncs succeeded at all, fall back to updating all (true offline mode)
+    let ids_to_update = if synced_ids.is_empty() {
+        message_ids.as_slice()
+    } else {
+        synced_ids.as_slice()
+    };
+
+    // Local bulk flag update — only for messages that succeeded remotely (or all if offline)
+    let changes: Vec<(String, Option<bool>, Option<bool>)> = ids_to_update
         .iter()
         .map(|id| (id.clone(), None, Some(starred)))
         .collect();
     state.store.bulk_update_flags(&changes)?;
-    let success_count = message_ids.len() as u32;
+    let success_count = ids_to_update.len() as u32;
 
     info!(
         "Batch star({}): {}/{} messages updated",
