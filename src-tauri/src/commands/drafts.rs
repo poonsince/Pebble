@@ -111,6 +111,7 @@ pub async fn delete_draft(
 ) -> std::result::Result<(), PebbleError> {
     let provider_type = state.store.get_account(&account_id)?
         .map(|a| a.provider);
+    let mut remote_ok = true;
     if let Some(pt) = provider_type {
         if let Ok(conn) = ConnectedProvider::connect(&state, &account_id, &pt).await {
             let result = match &conn {
@@ -121,9 +122,16 @@ pub async fn delete_draft(
             conn.disconnect().await;
             if let Err(e) = result {
                 warn!("Failed to delete remote draft: {e}");
+                remote_ok = false;
             }
+        } else {
+            // Connection failed — don't delete locally either
+            remote_ok = false;
         }
     }
-    let _ = state.store.hard_delete_messages(&[draft_id]);
+    // Only delete locally if the remote was either successful or not applicable (IMAP/no account)
+    if remote_ok {
+        let _ = state.store.hard_delete_messages(&[draft_id]);
+    }
     Ok(())
 }
