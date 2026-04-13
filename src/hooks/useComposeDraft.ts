@@ -101,11 +101,14 @@ export function useComposeDraft({
         saveDraftToStorage({ to, cc, bcc, subject, rawSource, richTextHtml, editorMode });
         // Also save to backend
         if (activeAccountId) {
+          // Pick body source based on current editor mode to avoid stale content
+          const bodyText = editorMode === "rich" ? "" : rawSource;
+          const bodyHtml = editorMode === "rich" ? richTextHtml : (editorMode === "html" ? rawSource : undefined);
           saveDraft({
             accountId: activeAccountId,
             to, cc, bcc, subject,
-            bodyText: rawSource,
-            bodyHtml: richTextHtml || undefined,
+            bodyText,
+            bodyHtml: bodyHtml || undefined,
             existingDraftId: draftIdRef.current || undefined,
           }).then((id) => {
             draftIdRef.current = id;
