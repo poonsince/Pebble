@@ -376,20 +376,28 @@ pub async fn complete_oauth_flow(
 
     state.store.insert_account(&account)?;
 
-    // Encrypt tokens and store as auth_data
-    let tokens = OAuthTokens {
-        access_token: token_pair.access_token,
-        refresh_token: token_pair.refresh_token,
-        expires_at: token_pair.expires_at,
-        scopes: token_pair.scopes,
-    };
-    persist_oauth_tokens(&state, &account.id, &tokens)?;
+    // If any subsequent step fails, delete the account row to prevent half-creation
+    if let Err(e) = (|| -> std::result::Result<(), PebbleError> {
+        // Encrypt tokens and store as auth_data
+        let tokens = OAuthTokens {
+            access_token: token_pair.access_token,
+            refresh_token: token_pair.refresh_token,
+            expires_at: token_pair.expires_at,
+            scopes: token_pair.scopes,
+        };
+        persist_oauth_tokens(&state, &account.id, &tokens)?;
 
-    // Store provider metadata in sync_state
-    let slug = provider_slug(&account.provider).to_string();
-    state.store.update_sync_state(&account.id, |s| {
-        s.provider = Some(slug);
-    })?;
+        // Store provider metadata in sync_state
+        let slug = provider_slug(&account.provider).to_string();
+        state.store.update_sync_state(&account.id, |s| {
+            s.provider = Some(slug);
+        })?;
+        Ok(())
+    })() {
+        // Rollback: remove the partially created account
+        let _ = state.store.delete_account(&account.id);
+        return Err(e);
+    }
 
     Ok(account)
 }

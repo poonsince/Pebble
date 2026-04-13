@@ -73,47 +73,55 @@ pub async fn add_account(
 
     state.store.insert_account(&account)?;
 
-    // Build proxy config if provided
-    let proxy = match (request.proxy_host, request.proxy_port) {
-        (Some(h), Some(p)) if !h.is_empty() => Some(ProxyConfig { host: h, port: p }),
-        _ => None,
-    };
+    // If any subsequent step fails, delete the account row to prevent half-creation
+    if let Err(e) = (|| -> std::result::Result<(), PebbleError> {
+        // Build proxy config if provided
+        let proxy = match (request.proxy_host, request.proxy_port) {
+            (Some(h), Some(p)) if !h.is_empty() => Some(ProxyConfig { host: h, port: p }),
+            _ => None,
+        };
 
-    // Build typed IMAP + SMTP credentials
-    let credentials = AccountCredentials {
-        imap: ImapConfig {
-            host: request.imap_host,
-            port: request.imap_port,
-            username: request.username.clone(),
-            password: request.password.clone(),
-            security: request.imap_security,
-            proxy: proxy.clone(),
-        },
-        smtp: SmtpConfig {
-            host: request.smtp_host,
-            port: request.smtp_port,
-            username: request.username,
-            password: request.password,
-            security: request.smtp_security,
-            proxy,
-        },
-    };
+        // Build typed IMAP + SMTP credentials
+        let credentials = AccountCredentials {
+            imap: ImapConfig {
+                host: request.imap_host,
+                port: request.imap_port,
+                username: request.username.clone(),
+                password: request.password.clone(),
+                security: request.imap_security,
+                proxy: proxy.clone(),
+            },
+            smtp: SmtpConfig {
+                host: request.smtp_host,
+                port: request.smtp_port,
+                username: request.username,
+                password: request.password,
+                security: request.smtp_security,
+                proxy,
+            },
+        };
 
-    // Encrypt credentials and store as auth_data
-    let config_bytes = serde_json::to_vec(&credentials)
-        .map_err(|e| PebbleError::Internal(format!("Failed to serialize config: {e}")))?;
-    let encrypted = state.crypto.encrypt(&config_bytes)?;
-    state.store.set_auth_data(&account.id, &encrypted)?;
+        // Encrypt credentials and store as auth_data
+        let config_bytes = serde_json::to_vec(&credentials)
+            .map_err(|e| PebbleError::Internal(format!("Failed to serialize config: {e}")))?;
+        let encrypted = state.crypto.encrypt(&config_bytes)?;
+        state.store.set_auth_data(&account.id, &encrypted)?;
 
-    // Store non-secret metadata in sync_state
-    let provider_slug = match provider {
-        ProviderType::Gmail => "gmail",
-        ProviderType::Outlook => "outlook",
-        ProviderType::Imap => "imap",
-    };
-    state.store.update_sync_state(&account.id, |s| {
-        s.provider = Some(provider_slug.to_string());
-    })?;
+        // Store non-secret metadata in sync_state
+        let provider_slug = match provider {
+            ProviderType::Gmail => "gmail",
+            ProviderType::Outlook => "outlook",
+            ProviderType::Imap => "imap",
+        };
+        state.store.update_sync_state(&account.id, |s| {
+            s.provider = Some(provider_slug.to_string());
+        })?;
+        Ok(())
+    })() {
+        // Rollback: remove the partially created account
+        let _ = state.store.delete_account(&account.id);
+        return Err(e);
+    }
 
     Ok(account)
 }
