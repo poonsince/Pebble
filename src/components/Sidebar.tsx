@@ -122,8 +122,16 @@ export default function Sidebar() {
     setActiveView(view);
   }
 
-  function handleFolderClick(folderId: string) {
-    safeSetActiveView("inbox");
+  async function handleFolderClick(folderId: string) {
+    if (isComposeDirty(useUIStore.getState())) {
+      const confirmed = await useConfirmStore.getState().confirm({
+        title: t("compose.discardDraft", "Discard draft"),
+        message: t("compose.discardDraftConfirm", "You have an unsaved draft. Discard and leave?"),
+        destructive: true,
+      });
+      if (!confirmed) return;
+    }
+    setActiveView("inbox");
     setActiveFolderId(folderId);
   }
 
