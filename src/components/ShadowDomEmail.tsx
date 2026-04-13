@@ -1,4 +1,5 @@
 import { useRef, useEffect } from "react";
+import { sanitizeHtml } from "@/lib/sanitizeHtml";
 
 interface ShadowDomEmailProps {
   html: string;
@@ -13,6 +14,7 @@ export function ShadowDomEmail({ html, className }: ShadowDomEmailProps) {
     const shadow = hostRef.current.shadowRoot
       || hostRef.current.attachShadow({ mode: "open" });
 
+    const safeHtml = sanitizeHtml(html);
     shadow.innerHTML = `
       <style>
         :host {
@@ -30,7 +32,7 @@ export function ShadowDomEmail({ html, className }: ShadowDomEmailProps) {
         table { max-width: 100%; border-collapse: collapse; }
         body, div { word-wrap: break-word; overflow-wrap: break-word; }
       </style>
-      <div>${html}</div>
+      <div>${safeHtml}</div>
     `;
   }, [html]);
 
