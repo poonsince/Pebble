@@ -15,6 +15,7 @@ import { listTemplates, saveTemplate, deleteTemplate } from "@/lib/templates";
 import type { EmailTemplate } from "@/lib/templates";
 import { useComposeRecipients } from "@/hooks/useComposeRecipients";
 import { useComposeDraft, loadDraftFromStorage, clearDraftStorage } from "@/hooks/useComposeDraft";
+import { deleteDraft } from "@/lib/api";
 import { useComposeEditor } from "@/hooks/useComposeEditor";
 import { ModeButton, EditorToolbar, MarkdownToolbar, composeStyles } from "./ComposeToolbar";
 
@@ -64,7 +65,7 @@ export default function ComposeView() {
   });
 
   // ─── Draft persistence ───────────────────────────────────────────────────────
-  useComposeDraft({
+  const { draftIdRef } = useComposeDraft({
     to, cc, bcc, subject, rawSource, richTextHtml, editorMode, composeMode,
   });
 
@@ -127,6 +128,12 @@ export default function ComposeView() {
       },
       {
         onSuccess: () => {
+          // Delete backend draft if one was saved
+          if (draftIdRef.current && fromAccountId) {
+            deleteDraft(fromAccountId, draftIdRef.current).catch((err) => {
+              console.warn("Failed to delete draft after send:", err);
+            });
+          }
           clearDraftStorage();
           useUIStore.getState().setComposeDirty(false);
           closeCompose();

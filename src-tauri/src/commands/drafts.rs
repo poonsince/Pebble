@@ -65,6 +65,12 @@ fn save_draft_locally(
     draft: &DraftMessage,
 ) -> std::result::Result<String, PebbleError> {
     let id = draft.id.clone().unwrap_or_else(pebble_core::new_id);
+
+    // Delete any existing draft with this ID to implement upsert semantics
+    if draft.id.is_some() {
+        let _ = state.store.hard_delete_messages(&[id.clone()]);
+    }
+
     let msg = pebble_core::Message {
         id: id.clone(),
         account_id: account_id.to_string(),

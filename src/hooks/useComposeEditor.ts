@@ -21,6 +21,7 @@ interface UseComposeEditorArgs {
   restoredDraft: {
     editorMode?: EditorMode;
     rawSource?: string;
+    richTextHtml?: string;
   } | null;
 }
 
@@ -97,7 +98,11 @@ export function useComposeEditor({
 
   // Set editor content after creation to avoid initialization crashes
   useEffect(() => {
-    if (editor && editorContent) {
+    if (!editor) return;
+    // If restoring a draft, prefer its richTextHtml over generated editorContent
+    if (restoredDraft?.richTextHtml) {
+      editor.commands.setContent(restoredDraft.richTextHtml);
+    } else if (editorContent) {
       editor.commands.setContent(editorContent);
     }
   }, [editor, editorContent]);
