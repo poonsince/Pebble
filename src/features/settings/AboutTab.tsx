@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { getVersion } from "@tauri-apps/api/app";
 import { invoke } from "@tauri-apps/api/core";
-import iconUrl from "/icon.png?url";
+import iconUrl from "@/assets/app-icon.png";
 
 const REPO = "QingJ01/Pebble";
 const RELEASES_URL = `https://github.com/${REPO}/releases`;
@@ -88,13 +88,13 @@ export default function AboutTab() {
         <p style={{ fontSize: "13px", color: "var(--color-text-secondary)", lineHeight: 1.7, margin: "0 0 8px" }}>
           {t(
             "about.description",
-            "A privacy-first desktop email client built with Rust and React. Mail, search index, and attachments stay on your device. No telemetry. Optional features like translation send only the selected text to the provider you configure.",
+            "A local-first desktop email client built with Rust and React. Mail, search index, and attachments stay on your device. No telemetry. Outbound traffic happens only when you use a feature that requires it: mail sync with your provider, translation (sends the selected text to the service you configure), or WebDAV settings backup (runs against the server you provide).",
           )}
         </p>
         <p style={{ fontSize: "13px", color: "var(--color-text-secondary)", lineHeight: 1.7, margin: "0 0 8px" }}>
           {t(
             "about.features",
-            "Supports Gmail, Outlook, and IMAP accounts. Includes Kanban board, full-text search, snooze, rules engine, built-in translation, and optional WebDAV settings backup.",
+            "Supports Gmail, Outlook, and IMAP accounts. Includes Kanban board, full-text search, snooze, rules engine, built-in translation, and WebDAV settings backup.",
           )}
         </p>
         <p style={{ fontSize: "12px", color: "var(--color-text-tertiary, var(--color-text-secondary))", lineHeight: 1.5, margin: 0 }}>

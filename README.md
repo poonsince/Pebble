@@ -7,7 +7,7 @@
 <p align="center">
   A privacy-first desktop email client built with Rust and React.
   <br>
-  Your data stays on your device — no telemetry, no compromise. Optional WebDAV backup for settings.
+  Local-first: mail, search index, and attachments stay on your device. No telemetry. Outbound traffic only for features you configure — mail sync, translation, and WebDAV settings backup.
 </p>
 
 <p align="center">
@@ -22,13 +22,13 @@
 ## Features
 
 **Privacy & Security**
-- 100% local storage — SQLite database, search index, attachments all on your device
+- Local-first storage — SQLite database, search index, attachments all on your device
 - AES-256 encrypted OAuth tokens and credentials with per-device key
-- No telemetry, no third-party data access; optional user-initiated settings backup via WebDAV
+- No telemetry. Outbound network traffic only for features you enable: mail sync with your provider, translation (sends the selected text to the service you configure), and WebDAV settings backup (runs against the server you provide)
 - Open source under AGPL-3.0
 
 **Email Management**
-- Gmail and IMAP support — all accounts in one place (Outlook support is experimental)
+- Gmail, Outlook, and IMAP support — all accounts in one place
 - Kanban board — drag emails across Todo, Waiting, and Done columns
 - Smart search powered by Tantivy full-text search engine
 - Snooze & Star — resurface emails later, mark what matters
