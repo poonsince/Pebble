@@ -60,7 +60,7 @@ export default function AccountSetup({ onClose }: Props) {
   const queryClient = useQueryClient();
   const emailInputRef = useRef<HTMLInputElement>(null);
 
-  const [form, setForm] = useState<AddAccountRequest>({
+  const initialForm: AddAccountRequest = {
     email: "",
     display_name: "",
     provider: "imap",
@@ -72,7 +72,9 @@ export default function AccountSetup({ onClose }: Props) {
     smtp_security: "starttls",
     username: "",
     password: "",
-  });
+  };
+  const [form, setForm] = useState<AddAccountRequest>(initialForm);
+  const initialFormRef = useRef(initialForm);
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -84,8 +86,11 @@ export default function AccountSetup({ onClose }: Props) {
   formRef.current = form;
 
   const requestClose = async () => {
-    const f = formRef.current;
-    const isDirty = !!(f.email || f.password || f.imap_host || f.display_name || f.smtp_host);
+    const current = formRef.current;
+    const initial = initialFormRef.current;
+    const isDirty = (Object.keys(current) as Array<keyof AddAccountRequest>).some(
+      (k) => current[k] !== initial[k],
+    );
     if (!isDirty) {
       onClose();
       return;
