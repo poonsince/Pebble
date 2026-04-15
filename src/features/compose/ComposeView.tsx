@@ -65,8 +65,18 @@ export default function ComposeView() {
   });
 
   // ─── Draft persistence ───────────────────────────────────────────────────────
+  // Delay the dirty-snapshot until the editor has run its initial setContent
+  // cycle — otherwise the snapshot captures an empty richTextHtml and then
+  // flips dirty when signature/quoted-reply text populates.
+  // For "new" composes with no signature the editor stays empty but is still
+  // "ready" once mounted, so we gate on editor presence plus one effect tick.
+  const [editorReady, setEditorReady] = useState(false);
+  useEffect(() => {
+    if (editor && !editorReady) setEditorReady(true);
+  }, [editor, editorReady]);
   const { draftIdRef } = useComposeDraft({
-    to, cc, bcc, subject, rawSource, richTextHtml, editorMode, composeMode,
+    to, cc, bcc, subject, rawSource, richTextHtml, editorMode, composeMode, fromAccountId,
+    editorReady,
   });
 
   // ─── Attachments ─────────────────────────────────────────────────────────────
