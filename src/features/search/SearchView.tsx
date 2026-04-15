@@ -199,7 +199,7 @@ export default function SearchView() {
         <div
           ref={resultsParentRef}
           style={{
-            width: selectedId ? "360px" : "100%",
+            width: selectedId ? "clamp(260px, 32%, 360px)" : "100%",
             flexShrink: 0,
             overflow: "auto",
             borderRight: selectedId ? "1px solid var(--color-border)" : "none",

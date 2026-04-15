@@ -113,6 +113,7 @@ export default function StatusBar() {
             onClick={handleSync}
             disabled={!activeAccountId}
             title={syncStatus === "syncing" ? t("status.stopSync") : t("status.syncNow")}
+            aria-label={syncStatus === "syncing" ? t("status.stopSync") : t("status.syncNow")}
             style={{
               background: "none",
               border: "none",

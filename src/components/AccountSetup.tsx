@@ -258,7 +258,7 @@ export default function AccountSetup({ onClose }: Props) {
       <div
         ref={dialogRef}
         style={{
-          width: "480px",
+          width: "min(480px, calc(100vw - 32px))",
           backgroundColor: "var(--color-bg)",
           borderRadius: "10px",
           boxShadow: "0 20px 60px rgba(0,0,0,0.3)",

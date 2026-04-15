@@ -170,7 +170,7 @@ export default function InboxView() {
         {/* List panel */}
         <div
           style={{
-            width: detailOpen ? "360px" : "100%",
+            width: detailOpen ? "clamp(260px, 32%, 360px)" : "100%",
             flexShrink: 0,
             borderRight: detailOpen ? "1px solid var(--color-border)" : "none",
             display: "flex",

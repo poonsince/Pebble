@@ -75,12 +75,35 @@ export default function MessageDetail({ messageId, onBack, folderRole }: Props) 
     }
   }
 
-  function handleMouseUp(e: React.MouseEvent) {
+  function openTranslateForSelection(position?: { x: number; y: number }) {
     const selection = window.getSelection();
     const selectedText = selection?.toString().trim() || "";
-    if (selectedText.length > 5) {
-      setShowTranslate({ text: selectedText, position: { x: e.clientX, y: e.clientY } });
+    if (selectedText.length <= 5) return;
+    if (position) {
+      setShowTranslate({ text: selectedText, position });
+      return;
     }
+    const range = selection?.rangeCount ? selection.getRangeAt(0) : null;
+    const rect = range?.getBoundingClientRect();
+    const x = rect && rect.width > 0 ? rect.left + rect.width / 2 : window.innerWidth / 2;
+    const y = rect && rect.height > 0 ? rect.bottom : window.innerHeight / 2;
+    setShowTranslate({ text: selectedText, position: { x, y } });
+  }
+
+  function handleMouseUp(e: React.MouseEvent) {
+    openTranslateForSelection({ x: e.clientX, y: e.clientY });
+  }
+
+  function handleContentKeyUp(e: React.KeyboardEvent) {
+    // Keyboard-equivalent entry to the mouse-driven translate popover: T fires
+    // on the current selection regardless of how the selection was built.
+    if (e.key !== "t" && e.key !== "T") return;
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    const target = e.target as HTMLElement | null;
+    if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)) {
+      return;
+    }
+    openTranslateForSelection();
   }
 
   if (loading) {
@@ -234,7 +257,14 @@ export default function MessageDetail({ messageId, onBack, folderRole }: Props) 
       )}
 
       {/* Body */}
-      <div style={{ flex: 1, overflow: "auto", padding: "16px" }} onMouseUp={handleMouseUp}>
+      <div
+        tabIndex={0}
+        role="region"
+        aria-label={t("messageDetail.body", "Message body")}
+        style={{ flex: 1, overflow: "auto", padding: "16px", outline: "none" }}
+        onMouseUp={handleMouseUp}
+        onKeyUp={handleContentKeyUp}
+      >
         {bilingualMode && bilingualLoading ? (
             <div style={{ fontSize: "13px", color: "var(--color-text-secondary)" }}>{t("common.translating", "Translating...")}</div>
         ) : bilingualMode && bilingualResult ? (
