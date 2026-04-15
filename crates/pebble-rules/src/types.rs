@@ -1,3 +1,10 @@
+//! Persisted rule schema — MUST stay byte-compatible with the frontend
+//! types in `src/features/settings/rule-json.ts`. The rules table stores
+//! the JSON serialization of these types, and the settings UI reads/writes
+//! the same strings. A rename or variant change on one side without the
+//! other will silently drop rules at load. Fix both sides together; a
+//! shared ts-rs-generated binding is tracked as future work.
+
 use serde::{Deserialize, Serialize};
 use pebble_core::KanbanColumn;
 

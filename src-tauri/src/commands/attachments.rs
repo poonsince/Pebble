@@ -32,6 +32,12 @@ fn is_windows_reserved_name(name: &str) -> bool {
 }
 
 /// Validate that save_to path is within a safe directory (user's home).
+///
+/// This is the security gate for attachment writes: it *rejects* suspicious
+/// paths rather than normalizing them. The FE helper at `src/lib/sanitizeFilename.ts`
+/// covers the complementary UX role of cleaning up suggested defaults; it is
+/// not a substitute for this check. Keep the character sets below in sync with
+/// the FE when they change.
 fn validate_save_path(save_to: &str) -> Result<(), PebbleError> {
     let path = Path::new(save_to);
     let canonical = path
@@ -57,6 +63,11 @@ fn validate_save_path(save_to: &str) -> Result<(), PebbleError> {
     if filename_str.chars().any(|c| matches!(c, '<' | '>' | ':' | '"' | '|' | '?' | '*')) {
         return Err(PebbleError::Validation(
             "Filename contains characters unsupported on Windows".to_string(),
+        ));
+    }
+    if filename_str.chars().any(|c| (c as u32) < 0x20) {
+        return Err(PebbleError::Validation(
+            "Filename contains control characters".to_string(),
         ));
     }
     let stem = Path::new(filename)

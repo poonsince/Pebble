@@ -174,6 +174,10 @@ export async function updateMessageFlags(
   return invoke<void>("update_message_flags", { messageId, isRead, isStarred });
 }
 
+// Rapid-toggle guard: archive_message is toggle-based (archive ⇄ unarchive),
+// so a double-click would flip the state back. This Set coalesces concurrent
+// calls per-message; it is NOT idempotency — a second click *after* the first
+// resolves is intentionally allowed to unarchive.
 const archivingIds = new Set<string>();
 
 export async function archiveMessage(messageId: string): Promise<string> {
