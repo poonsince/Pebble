@@ -80,6 +80,15 @@ export interface Message extends MessageSummary {
   body_html_raw: string;
 }
 
+export interface PendingMailOpsSummary {
+  pending_count: number;
+  in_progress_count: number;
+  failed_count: number;
+  total_active_count: number;
+  last_error: string | null;
+  updated_at: number | null;
+}
+
 /** @rust pebble-core/src/types.rs → RenderedHtml */
 export interface RenderedHtml {
   html: string;

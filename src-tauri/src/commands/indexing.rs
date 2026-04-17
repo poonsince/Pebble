@@ -5,10 +5,12 @@
 //! so the sync lifecycle and the indexing pipeline can evolve independently.
 
 use crate::events;
+use crate::commands::pending_mail_ops::queue_pending_mail_op;
 use pebble_core::PebbleError;
 use pebble_rules::RuleEngine;
 use pebble_search::TantivySearch;
 use pebble_store::Store;
+use serde_json::json;
 use std::sync::Arc;
 use tauri::Emitter;
 use tokio::sync::mpsc;
@@ -201,10 +203,18 @@ fn apply_rule_action(
     use pebble_rules::types::RuleAction;
     match action {
         RuleAction::MarkRead => {
+            if queue_remote_rule_action(store, account_id, message_id, action)? {
+                info!("Rule: queued remote mark-read for message {}", message_id);
+                return Ok(());
+            }
             store.update_message_flags(message_id, Some(true), None)?;
             info!("Rule: marked message {} as read", message_id);
         }
         RuleAction::Archive => {
+            if queue_remote_rule_action(store, account_id, message_id, action)? {
+                info!("Rule: queued remote archive for message {}", message_id);
+                return Ok(());
+            }
             if let Some(archive_folder) = store.find_folder_by_role(account_id, pebble_core::FolderRole::Archive)? {
                 store.move_message_to_folder(message_id, &archive_folder.id)?;
                 info!("Rule: archived message {} to folder {}", message_id, archive_folder.name);
@@ -217,10 +227,14 @@ fn apply_rule_action(
             store.add_label(message_id, label)?;
             info!("Rule: added label '{}' to message {}", label, message_id);
         }
-        // TODO: MoveToFolder only updates the local DB; it does not issue an
-        // IMAP MOVE or Gmail label change, so the remote mailbox stays unchanged.
-        // A future provider-aware action layer should propagate the move upstream.
         RuleAction::MoveToFolder(folder_name) => {
+            if queue_remote_rule_action(store, account_id, message_id, action)? {
+                info!(
+                    "Rule: queued remote move for message {} to folder '{}'",
+                    message_id, folder_name
+                );
+                return Ok(());
+            }
             if let Some(target_folder) = store.find_folder_by_name(account_id, folder_name)? {
                 store.move_message_to_folder(message_id, &target_folder.id)?;
                 info!("Rule: moved message {} to folder '{}'", message_id, target_folder.name);
@@ -242,4 +256,191 @@ fn apply_rule_action(
         }
     }
     Ok(())
+}
+
+fn queue_remote_rule_action(
+    store: &Store,
+    account_id: &str,
+    message_id: &str,
+    action: &pebble_rules::types::RuleAction,
+) -> pebble_core::Result<bool> {
+    use pebble_core::{FolderRole, ProviderType};
+    use pebble_rules::types::RuleAction;
+
+    let Some(account) = store.get_account(account_id)? else {
+        return Ok(false);
+    };
+    let Some(message) = store.get_message(message_id)? else {
+        return Ok(false);
+    };
+    let source_folder = store
+        .get_message_folder_ids(message_id)?
+        .into_iter()
+        .next()
+        .and_then(|folder_id| {
+            store
+                .list_folders(account_id)
+                .ok()?
+                .into_iter()
+                .find(|folder| folder.id == folder_id)
+        });
+
+    match action {
+        RuleAction::MarkRead => {
+            if account.provider == ProviderType::Imap
+                && source_folder
+                    .as_ref()
+                    .is_some_and(|folder| folder.remote_id.starts_with("__local_"))
+            {
+                return Ok(false);
+            }
+
+            let mut payload = json!({
+                "is_read": true,
+                "is_starred": null,
+            });
+            if account.provider == ProviderType::Gmail {
+                payload["add_labels"] = json!([]);
+                payload["remove_labels"] = json!(["UNREAD"]);
+            }
+            if let Some(folder) = source_folder.as_ref() {
+                payload["folder_remote_id"] = json!(folder.remote_id);
+            }
+            queue_pending_mail_op(store, &message, "update_flags", payload)?;
+            Ok(true)
+        }
+        RuleAction::Archive => {
+            let archive_folder = store.find_folder_by_role(account_id, FolderRole::Archive)?;
+            if let Some(archive) = archive_folder.as_ref() {
+                if archive.remote_id.starts_with("__local_") {
+                    return Ok(false);
+                }
+            } else if account.provider != ProviderType::Gmail {
+                return Ok(false);
+            }
+
+            let mut payload = json!({
+                "source_folder_id": source_folder.as_ref().map(|folder| folder.id.as_str()),
+                "source_folder_remote_id": source_folder.as_ref().map(|folder| folder.remote_id.as_str()),
+                "target_folder_id": archive_folder.as_ref().map(|folder| folder.id.as_str()),
+                "target_folder_remote_id": archive_folder.as_ref().map(|folder| folder.remote_id.as_str()),
+            });
+            if account.provider == ProviderType::Gmail {
+                payload["add_labels"] = json!([]);
+                payload["remove_labels"] = json!(["INBOX"]);
+            }
+            queue_pending_mail_op(store, &message, "archive", payload)?;
+            Ok(true)
+        }
+        RuleAction::MoveToFolder(folder_name) => {
+            let Some(target_folder) = store.find_folder_by_name(account_id, folder_name)? else {
+                return Ok(false);
+            };
+            if target_folder.remote_id.starts_with("__local_") {
+                return Ok(false);
+            }
+
+            let mut payload = json!({
+                "source_folder_id": source_folder.as_ref().map(|folder| folder.id.as_str()),
+                "source_folder_remote_id": source_folder.as_ref().map(|folder| folder.remote_id.as_str()),
+                "target_folder_id": target_folder.id,
+                "target_folder_remote_id": target_folder.remote_id,
+            });
+            if account.provider == ProviderType::Gmail {
+                payload["add_labels"] = json!([target_folder.remote_id]);
+                payload["remove_labels"] = json!(["INBOX"]);
+            }
+            queue_pending_mail_op(store, &message, "move_to_folder", payload)?;
+            Ok(true)
+        }
+        RuleAction::AddLabel(_) | RuleAction::SetKanbanColumn(_) => Ok(false),
+    }
+}
+
+#[cfg(test)]
+mod rule_writeback_tests {
+    use super::apply_rule_action;
+    use pebble_core::*;
+    use pebble_rules::types::RuleAction;
+    use pebble_store::pending_ops::PendingMailOpStatus;
+    use pebble_store::Store;
+
+    fn test_account() -> Account {
+        let now = now_timestamp();
+        Account {
+            id: new_id(),
+            email: "test@example.com".to_string(),
+            display_name: "Test".to_string(),
+            provider: ProviderType::Gmail,
+            created_at: now,
+            updated_at: now,
+        }
+    }
+
+    fn test_folder(account_id: &str) -> Folder {
+        Folder {
+            id: new_id(),
+            account_id: account_id.to_string(),
+            remote_id: "INBOX".to_string(),
+            name: "Inbox".to_string(),
+            folder_type: FolderType::Folder,
+            role: Some(FolderRole::Inbox),
+            parent_id: None,
+            color: None,
+            is_system: true,
+            sort_order: 0,
+        }
+    }
+
+    fn test_message(account_id: &str) -> Message {
+        let now = now_timestamp();
+        Message {
+            id: new_id(),
+            account_id: account_id.to_string(),
+            remote_id: "remote-123".to_string(),
+            message_id_header: None,
+            in_reply_to: None,
+            references_header: None,
+            thread_id: None,
+            subject: "Test".to_string(),
+            snippet: "test".to_string(),
+            from_address: "from@example.com".to_string(),
+            from_name: "From".to_string(),
+            to_list: vec![],
+            cc_list: vec![],
+            bcc_list: vec![],
+            body_text: "body".to_string(),
+            body_html_raw: String::new(),
+            has_attachments: false,
+            is_read: false,
+            is_starred: false,
+            is_draft: false,
+            date: now,
+            remote_version: None,
+            is_deleted: false,
+            deleted_at: None,
+            created_at: now,
+            updated_at: now,
+        }
+    }
+
+    #[test]
+    fn rule_mark_read_for_remote_account_queues_pending_op_before_local_commit() {
+        let store = Store::open_in_memory().unwrap();
+        let account = test_account();
+        store.insert_account(&account).unwrap();
+        let folder = test_folder(&account.id);
+        store.insert_folder(&folder).unwrap();
+        let message = test_message(&account.id);
+        store.insert_message(&message, &[folder.id]).unwrap();
+
+        apply_rule_action(&store, &account.id, &message.id, &RuleAction::MarkRead).unwrap();
+
+        let reloaded = store.get_message(&message.id).unwrap().unwrap();
+        assert!(!reloaded.is_read);
+        let ops = store.list_pending_mail_ops(&account.id).unwrap();
+        assert_eq!(ops.len(), 1);
+        assert_eq!(ops[0].op_type, "update_flags");
+        assert_eq!(ops[0].status, PendingMailOpStatus::Pending);
+    }
 }

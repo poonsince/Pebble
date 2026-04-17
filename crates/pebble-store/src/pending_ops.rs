@@ -1,5 +1,5 @@
 use pebble_core::{PebbleError, Result};
-use rusqlite::params;
+use rusqlite::{params, OptionalExtension};
 
 use crate::Store;
 
@@ -46,6 +46,16 @@ pub struct PendingMailOp {
     pub last_error: Option<String>,
     pub created_at: i64,
     pub updated_at: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PendingMailOpsSummary {
+    pub pending_count: i64,
+    pub in_progress_count: i64,
+    pub failed_count: i64,
+    pub total_active_count: i64,
+    pub last_error: Option<String>,
+    pub updated_at: Option<i64>,
 }
 
 impl Store {
@@ -130,6 +140,145 @@ impl Store {
                 });
             }
             Ok(ops)
+        })
+    }
+
+    pub fn list_retryable_pending_mail_ops(&self, limit: i64) -> Result<Vec<PendingMailOp>> {
+        self.with_read(|conn| {
+            let mut stmt = conn.prepare(
+                "SELECT id, account_id, message_id, op_type, payload_json, status,
+                        attempts, last_error, created_at, updated_at
+                 FROM pending_mail_ops
+                 WHERE status IN ('pending', 'failed')
+                 ORDER BY updated_at ASC
+                 LIMIT ?1",
+            )?;
+            let rows = stmt.query_map(params![limit], |row| {
+                let status: String = row.get(5)?;
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, String>(4)?,
+                    status,
+                    row.get::<_, i64>(6)?,
+                    row.get::<_, Option<String>>(7)?,
+                    row.get::<_, i64>(8)?,
+                    row.get::<_, i64>(9)?,
+                ))
+            })?;
+
+            let mut ops = Vec::new();
+            for row in rows {
+                let (
+                    id,
+                    account_id,
+                    message_id,
+                    op_type,
+                    payload_json,
+                    status,
+                    attempts,
+                    last_error,
+                    created_at,
+                    updated_at,
+                ) = row?;
+                ops.push(PendingMailOp {
+                    id,
+                    account_id,
+                    message_id,
+                    op_type,
+                    payload_json,
+                    status: status_from_str(&status)?,
+                    attempts,
+                    last_error,
+                    created_at,
+                    updated_at,
+                });
+            }
+            Ok(ops)
+        })
+    }
+
+    pub fn pending_mail_ops_summary(
+        &self,
+        account_id: Option<&str>,
+    ) -> Result<PendingMailOpsSummary> {
+        self.with_read(|conn| {
+            let (pending_count, in_progress_count, failed_count, updated_at): (
+                i64,
+                i64,
+                i64,
+                Option<i64>,
+            ) = conn.query_row(
+                "SELECT
+                    COALESCE(SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END), 0),
+                    COALESCE(SUM(CASE WHEN status = 'in_progress' THEN 1 ELSE 0 END), 0),
+                    COALESCE(SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END), 0),
+                    MAX(updated_at)
+                 FROM pending_mail_ops
+                 WHERE status != 'done'
+                   AND (?1 IS NULL OR account_id = ?1)",
+                params![account_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )?;
+
+            let last_error = conn
+                .query_row(
+                    "SELECT last_error
+                     FROM pending_mail_ops
+                     WHERE status = 'failed'
+                       AND last_error IS NOT NULL
+                       AND (?1 IS NULL OR account_id = ?1)
+                     ORDER BY updated_at DESC
+                     LIMIT 1",
+                    params![account_id],
+                    |row| row.get::<_, String>(0),
+                )
+                .optional()?;
+
+            Ok(PendingMailOpsSummary {
+                pending_count,
+                in_progress_count,
+                failed_count,
+                total_active_count: pending_count + in_progress_count + failed_count,
+                last_error,
+                updated_at,
+            })
+        })
+    }
+
+    pub fn mark_pending_mail_op_in_progress(&self, id: &str) -> Result<()> {
+        self.with_write(|conn| {
+            conn.execute(
+                "UPDATE pending_mail_ops
+                 SET status = ?1,
+                     updated_at = ?2
+                 WHERE id = ?3",
+                params![
+                    PendingMailOpStatus::InProgress.as_str(),
+                    pebble_core::now_timestamp(),
+                    id,
+                ],
+            )?;
+            Ok(())
+        })
+    }
+
+    pub fn reset_in_progress_pending_mail_ops(&self) -> Result<()> {
+        self.with_write(|conn| {
+            conn.execute(
+                "UPDATE pending_mail_ops
+                 SET status = ?1,
+                     updated_at = ?2
+                 WHERE status = ?3",
+                params![
+                    PendingMailOpStatus::Pending.as_str(),
+                    pebble_core::now_timestamp(),
+                    PendingMailOpStatus::InProgress.as_str(),
+                ],
+            )?;
+            Ok(())
         })
     }
 
@@ -267,5 +416,70 @@ mod tests {
         store.mark_pending_mail_op_done(&op_id).unwrap();
         let done = store.list_pending_mail_ops(&account.id).unwrap();
         assert_eq!(done[0].status, PendingMailOpStatus::Done);
+    }
+
+    #[test]
+    fn pending_mail_ops_retryable_list_and_summary_ignore_done_ops() {
+        let store = Store::open_in_memory().unwrap();
+        let account = test_account();
+        store.insert_account(&account).unwrap();
+        let folder = test_folder(&account.id);
+        store.insert_folder(&folder).unwrap();
+        let message = test_message(&account.id);
+        store.insert_message(&message, &[folder.id]).unwrap();
+
+        let pending_id = store
+            .insert_pending_mail_op(&account.id, &message.id, "archive", "{}")
+            .unwrap();
+        let failed_id = store
+            .insert_pending_mail_op(&account.id, &message.id, "update_flags", "{}")
+            .unwrap();
+        let done_id = store
+            .insert_pending_mail_op(&account.id, &message.id, "delete", "{}")
+            .unwrap();
+
+        store
+            .mark_pending_mail_op_failed(&failed_id, "network unavailable")
+            .unwrap();
+        store.mark_pending_mail_op_done(&done_id).unwrap();
+
+        let retryable = store.list_retryable_pending_mail_ops(10).unwrap();
+        let retryable_ids: Vec<_> = retryable.iter().map(|op| op.id.as_str()).collect();
+        assert_eq!(retryable_ids, vec![pending_id.as_str(), failed_id.as_str()]);
+
+        store.mark_pending_mail_op_in_progress(&pending_id).unwrap();
+        let summary = store.pending_mail_ops_summary(Some(&account.id)).unwrap();
+        assert_eq!(summary.pending_count, 0);
+        assert_eq!(summary.in_progress_count, 1);
+        assert_eq!(summary.failed_count, 1);
+        assert_eq!(summary.total_active_count, 2);
+        assert_eq!(summary.last_error.as_deref(), Some("network unavailable"));
+
+        let retryable_after_claim = store.list_retryable_pending_mail_ops(10).unwrap();
+        assert_eq!(retryable_after_claim.len(), 1);
+        assert_eq!(retryable_after_claim[0].id, failed_id);
+    }
+
+    #[test]
+    fn pending_mail_ops_can_reset_stuck_in_progress_ops() {
+        let store = Store::open_in_memory().unwrap();
+        let account = test_account();
+        store.insert_account(&account).unwrap();
+        let folder = test_folder(&account.id);
+        store.insert_folder(&folder).unwrap();
+        let message = test_message(&account.id);
+        store.insert_message(&message, &[folder.id]).unwrap();
+
+        let op_id = store
+            .insert_pending_mail_op(&account.id, &message.id, "archive", "{}")
+            .unwrap();
+        store.mark_pending_mail_op_in_progress(&op_id).unwrap();
+
+        store.reset_in_progress_pending_mail_ops().unwrap();
+
+        let retryable = store.list_retryable_pending_mail_ops(10).unwrap();
+        assert_eq!(retryable.len(), 1);
+        assert_eq!(retryable[0].id, op_id);
+        assert_eq!(retryable[0].status, PendingMailOpStatus::Pending);
     }
 }

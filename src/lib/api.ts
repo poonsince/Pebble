@@ -16,6 +16,7 @@ export type {
   Label,
   Message,
   MessageSummary,
+  PendingMailOpsSummary,
   PrivacyMode,
   RenderedHtml,
   Rule,
@@ -41,6 +42,7 @@ import type {
   Label,
   Message,
   MessageSummary,
+  PendingMailOpsSummary,
   PrivacyMode,
   RenderedHtml,
   Rule,
@@ -206,6 +208,12 @@ export async function moveToFolder(messageId: string, targetFolderId: string): P
 
 export async function emptyTrash(accountId: string): Promise<number> {
   return invoke<number>("empty_trash", { accountId });
+}
+
+export async function getPendingMailOpsSummary(
+  accountId: string | null,
+): Promise<PendingMailOpsSummary> {
+  return invoke<PendingMailOpsSummary>("get_pending_mail_ops_summary", { accountId });
 }
 
 // ─── Trusted Senders API ────────────────────────────────────────────────────

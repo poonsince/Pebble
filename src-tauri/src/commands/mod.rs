@@ -15,6 +15,7 @@ pub mod labels;
 pub mod messages;
 pub mod notifications;
 pub mod oauth;
+pub mod pending_mail_ops;
 pub mod rules;
 pub mod search;
 pub mod snooze;

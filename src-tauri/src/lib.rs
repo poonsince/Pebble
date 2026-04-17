@@ -157,8 +157,14 @@ pub fn run() {
             });
 
             // Auto-resume sync for all existing accounts
+            let app_for_sync = app_handle.clone();
             tauri::async_runtime::spawn(async move {
-                commands::sync_cmd::resume_all_syncs(app_handle).await;
+                commands::sync_cmd::resume_all_syncs(app_for_sync).await;
+            });
+
+            let app_for_pending_ops = app_handle.clone();
+            tauri::async_runtime::spawn(async move {
+                commands::pending_mail_ops::run_pending_mail_ops_worker(app_for_pending_ops).await;
             });
 
             Ok(())
@@ -231,6 +237,7 @@ pub fn run() {
             commands::advanced_search::advanced_search,
             commands::sync_cmd::reindex_search,
             commands::notifications::set_notifications_enabled,
+            commands::pending_mail_ops::get_pending_mail_ops_summary,
             commands::drafts::save_draft,
             commands::drafts::delete_draft,
             commands::folder_counts::get_folder_unread_counts,

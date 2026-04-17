@@ -15,3 +15,7 @@ export { useMessageQuery, messageQueryKey } from "./useMessageQuery";
 export { useSearchQuery, searchQueryKey } from "./useSearchQuery";
 export { useAttachmentsQuery, attachmentsQueryKey } from "./useAttachmentsQuery";
 export { useThreadMessagesQuery, threadMessagesQueryKey } from "./useThreadMessagesQuery";
+export {
+  usePendingMailOpsSummary,
+  pendingMailOpsSummaryQueryKey,
+} from "./usePendingMailOpsSummary";

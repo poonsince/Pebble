@@ -1,12 +1,16 @@
 import { useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { listen } from "@tauri-apps/api/event";
-import { RefreshCw } from "lucide-react";
+import { AlertCircle, Clock, RefreshCw } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useUIStore } from "../stores/ui.store";
 import { useMailStore } from "@/stores/mail.store";
 import { stopSync } from "@/lib/api";
 import { useSyncMutation } from "@/hooks/mutations/useSyncMutation";
+import {
+  pendingMailOpsSummaryQueryKey,
+  usePendingMailOpsSummary,
+} from "@/hooks/queries";
 
 interface MailErrorPayload {
   error_type: string;
@@ -24,6 +28,7 @@ export default function StatusBar() {
   const activeAccountId = useMailStore((s) => s.activeAccountId);
   const syncMutation = useSyncMutation();
   const queryClient = useQueryClient();
+  const { data: pendingOpsSummary } = usePendingMailOpsSummary(activeAccountId);
 
   // Listen for mail:error events from Rust backend
   useEffect(() => {
@@ -57,6 +62,18 @@ export default function StatusBar() {
     return () => { unlisten.then((fn) => fn()); };
   }, [queryClient]);
 
+  useEffect(() => {
+    const unlisten = listen("mail:pending-ops-changed", () => {
+      queryClient.invalidateQueries({
+        queryKey: pendingMailOpsSummaryQueryKey(activeAccountId),
+      });
+      queryClient.invalidateQueries({ queryKey: ["folders"] });
+      queryClient.invalidateQueries({ queryKey: ["messages"] });
+      queryClient.invalidateQueries({ queryKey: ["threads"] });
+    });
+    return () => { unlisten.then((fn) => fn()); };
+  }, [activeAccountId, queryClient]);
+
   async function handleSync() {
     if (!activeAccountId) return;
     if (syncStatus === "syncing") {
@@ -80,6 +97,14 @@ export default function StatusBar() {
   }[syncStatus];
 
   const notificationsEnabled = typeof window !== "undefined" && localStorage.getItem("pebble-notifications-enabled") === "true";
+  const pendingRemoteWrites = pendingOpsSummary?.total_active_count ?? 0;
+  const failedRemoteWrites = pendingOpsSummary?.failed_count ?? 0;
+  const retryingRemoteWrites = pendingOpsSummary?.in_progress_count ?? 0;
+  const pendingRemoteText = retryingRemoteWrites > 0
+    ? t("status.remoteWritesRetrying", "{{count}} remote writes retrying", { count: retryingRemoteWrites })
+    : failedRemoteWrites > 0
+      ? t("status.remoteWritesPending", "{{count}} remote writes pending", { count: pendingRemoteWrites })
+      : t("status.remoteWritesQueued", "{{count}} remote writes queued", { count: pendingRemoteWrites });
 
   return (
     <footer
@@ -132,6 +157,21 @@ export default function StatusBar() {
               }}
             />
           </button>
+          {pendingRemoteWrites > 0 && (
+            <span
+              className="flex items-center gap-1 truncate"
+              title={pendingOpsSummary?.last_error ?? pendingRemoteText}
+              style={{
+                color: failedRemoteWrites > 0
+                  ? "var(--color-warning, #d97706)"
+                  : "var(--color-text-secondary)",
+                maxWidth: "220px",
+              }}
+            >
+              {failedRemoteWrites > 0 ? <AlertCircle size={13} /> : <Clock size={13} />}
+              <span className="truncate">{pendingRemoteText}</span>
+            </span>
+          )}
         </>
       )}
 
