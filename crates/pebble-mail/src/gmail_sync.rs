@@ -267,9 +267,13 @@ impl GmailSyncWorker {
             .map(|f| (f.remote_id, f.id))
             .collect();
         let limit = if stored_cursor.is_some() { 50 } else { 200 };
+        let mut thread_mappings = self
+            .base.store
+            .get_thread_mappings(&self.base.account_id)
+            .unwrap_or_default();
 
         for label_id in &labels_to_sync {
-            if let Err(e) = self.sync_label(label_id, limit, &folders_by_remote).await {
+            if let Err(e) = self.sync_label(label_id, limit, &folders_by_remote, &mut thread_mappings).await {
                 warn!("Gmail sync label {} failed: {}", label_id, e);
             }
         }
@@ -284,7 +288,7 @@ impl GmailSyncWorker {
     }
 
     /// Sync messages for a specific Gmail label.
-    async fn sync_label(&self, label_id: &str, limit: u32, folders_by_remote: &HashMap<String, String>) -> Result<u32> {
+    async fn sync_label(&self, label_id: &str, limit: u32, folders_by_remote: &HashMap<String, String>, thread_mappings: &mut HashMap<String, String>) -> Result<u32> {
         let folder_id = match folders_by_remote.get(label_id) {
             Some(id) => id.clone(),
             None => {
@@ -303,14 +307,6 @@ impl GmailSyncWorker {
         let existing = self
             .base.store
             .get_existing_message_map_by_remote_ids(&self.base.account_id, &remote_ids)
-            .unwrap_or_default();
-
-        // TODO: Gmail messages are fetched one-by-one (async fetch_sync_message), so we
-        // cannot collect In-Reply-To/References refs before the loop without pre-fetching
-        // all messages. Use the full mapping for now; optimise once batch-fetch is added.
-        let mut thread_mappings = self
-            .base.store
-            .get_thread_mappings(&self.base.account_id)
             .unwrap_or_default();
 
         let mut stored_count = 0u32;
@@ -334,7 +330,7 @@ impl GmailSyncWorker {
                 .await
             {
                 Ok(fetched) => match self
-                    .store_fetched_message(fetched, &folder_id, &mut thread_mappings, folders_by_remote)
+                    .store_fetched_message(fetched, &folder_id, thread_mappings, folders_by_remote)
                     .await
                 {
                     Ok(true) => stored_count += 1,

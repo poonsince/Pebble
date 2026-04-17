@@ -872,7 +872,20 @@ impl Store {
         self.with_read(|conn| {
             let mut stmt = conn
                 .prepare(
-                    "SELECT
+                    "WITH thread_participants AS (
+                        SELECT thread_id,
+                               GROUP_CONCAT(from_address, '||') AS participants
+                        FROM (
+                            SELECT DISTINCT m3.thread_id, m3.from_address
+                            FROM messages m3
+                            JOIN message_folders mf3 ON m3.id = mf3.message_id
+                            WHERE mf3.folder_id = ?1
+                              AND m3.is_deleted = 0
+                              AND m3.thread_id IS NOT NULL
+                        )
+                        GROUP BY thread_id
+                     )
+                     SELECT
                         m.thread_id,
                         MAX(m.subject) as subject,
                         MAX(CASE WHEN m.date = max_date.md THEN m.snippet ELSE '' END) as snippet,
@@ -880,14 +893,7 @@ impl Store {
                         COUNT(*) as message_count,
                         SUM(CASE WHEN m.is_read = 0 THEN 1 ELSE 0 END) as unread_count,
                         MAX(m.is_starred) as is_starred,
-                        (SELECT GROUP_CONCAT(fa, '||') FROM (
-                            SELECT DISTINCT m3.from_address AS fa
-                            FROM messages m3
-                            JOIN message_folders mf3 ON m3.id = mf3.message_id
-                            WHERE mf3.folder_id = ?1
-                              AND m3.thread_id = m.thread_id
-                              AND m3.is_deleted = 0
-                        )) as participants,
+                        COALESCE(tp.participants, '') as participants,
                         MAX(m.has_attachments) as has_attachments
                      FROM messages m
                      JOIN message_folders mf ON m.id = mf.message_id
@@ -900,6 +906,7 @@ impl Store {
                           AND m2.thread_id IS NOT NULL
                         GROUP BY m2.thread_id
                      ) max_date ON m.thread_id = max_date.thread_id
+                     LEFT JOIN thread_participants tp ON m.thread_id = tp.thread_id
                      WHERE mf.folder_id = ?1 AND m.is_deleted = 0 AND m.thread_id IS NOT NULL
                      GROUP BY m.thread_id
                      ORDER BY last_date DESC
