@@ -4,7 +4,7 @@ import { useKanbanStore } from "@/stores/kanban.store";
 import { useToastStore } from "@/stores/toast.store";
 import { useTranslation } from "react-i18next";
 import { useUpdateFlagsMutation } from "@/hooks/mutations/useUpdateFlagsMutation";
-import { useUIStore } from "@/stores/ui.store";
+import { useComposeStore } from "@/stores/compose.store";
 import { archiveMessage, deleteMessage, restoreMessage } from "@/lib/api";
 import type { Message } from "@/lib/api";
 import {
@@ -29,7 +29,7 @@ export default function MessageActionToolbar({
   onMessageUpdate,
 }: Props) {
   const { t } = useTranslation();
-  const openCompose = useUIStore((s) => s.openCompose);
+  const openCompose = useComposeStore((s) => s.openCompose);
   const queryClient = useQueryClient();
   const flagsMutation = useUpdateFlagsMutation();
   const inKanban = useKanbanStore((s) => s.cardIdSet.has(message.id));

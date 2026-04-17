@@ -1,5 +1,5 @@
 import { useEffect, useRef, useCallback } from "react";
-import { useUIStore } from "@/stores/ui.store";
+import { useComposeStore } from "@/stores/compose.store";
 import { saveDraft } from "@/lib/api";
 
 import type { EditorMode } from "./useComposeEditor";
@@ -124,7 +124,7 @@ export function useComposeDraft({
       subject !== init.subject ||
       rawSource !== init.rawSource ||
       richTextHtml !== init.richTextHtml;
-    useUIStore.getState().setComposeDirty(userChanged);
+    useComposeStore.getState().setComposeDirty(userChanged);
   }, [arraysEqual, bcc, cc, rawSource, richTextHtml, subject, to, editorReady]);
 
   // Auto-save draft to localStorage and backend (debounced 3s)

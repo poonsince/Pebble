@@ -14,7 +14,8 @@ import {
   Star,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { useUIStore, isComposeDirty } from "../stores/ui.store";
+import { useUIStore } from "../stores/ui.store";
+import { isComposeDirty } from "../stores/compose.store";
 import { useConfirmStore } from "../stores/confirm.store";
 import { useMailStore } from "../stores/mail.store";
 import { useAccountsQuery, useFoldersQuery } from "../hooks/queries";
@@ -111,7 +112,7 @@ export default function Sidebar() {
   }, [folders, activeFolderId, setActiveFolderId]);
 
   async function safeSetActiveView(view: Parameters<typeof setActiveView>[0]) {
-    if (isComposeDirty(useUIStore.getState())) {
+    if (isComposeDirty()) {
       const confirmed = await useConfirmStore.getState().confirm({
         title: t("compose.discardDraft", "Discard draft"),
         message: t("compose.discardDraftConfirm", "You have an unsaved draft. Discard and leave?"),
@@ -123,7 +124,7 @@ export default function Sidebar() {
   }
 
   async function handleFolderClick(folderId: string) {
-    if (isComposeDirty(useUIStore.getState())) {
+    if (isComposeDirty()) {
       const confirmed = await useConfirmStore.getState().confirm({
         title: t("compose.discardDraft", "Discard draft"),
         message: t("compose.discardDraftConfirm", "You have an unsaved draft. Discard and leave?"),

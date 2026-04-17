@@ -6,8 +6,8 @@ import {
   Paperclip, FileText, Trash2, BookTemplate,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { useUIStore } from "@/stores/ui.store";
 import { useMailStore } from "@/stores/mail.store";
+import { useComposeStore } from "@/stores/compose.store";
 import { useAccountsQuery } from "@/hooks/queries";
 import { useSendEmailMutation } from "@/hooks/mutations";
 import ContactAutocomplete from "@/components/ContactAutocomplete";
@@ -21,12 +21,12 @@ import { ModeButton, EditorToolbar, MarkdownToolbar, composeStyles } from "./Com
 
 export default function ComposeView() {
   const { t } = useTranslation();
-  const composeMode = useUIStore((s) => s.composeMode);
-  const composeReplyTo = useUIStore((s) => s.composeReplyTo);
-  const closeCompose = useUIStore((s) => s.closeCompose);
-  const showComposeLeaveConfirm = useUIStore((s) => s.showComposeLeaveConfirm);
-  const confirmCloseCompose = useUIStore((s) => s.confirmCloseCompose);
-  const cancelCloseCompose = useUIStore((s) => s.cancelCloseCompose);
+  const composeMode = useComposeStore((s) => s.composeMode);
+  const composeReplyTo = useComposeStore((s) => s.composeReplyTo);
+  const closeCompose = useComposeStore((s) => s.closeCompose);
+  const showComposeLeaveConfirm = useComposeStore((s) => s.showComposeLeaveConfirm);
+  const confirmCloseCompose = useComposeStore((s) => s.confirmCloseCompose);
+  const cancelCloseCompose = useComposeStore((s) => s.cancelCloseCompose);
   const activeAccountId = useMailStore((s) => s.activeAccountId);
   const { data: accounts = [] } = useAccountsQuery();
 
@@ -145,7 +145,7 @@ export default function ComposeView() {
             });
           }
           clearDraftStorage();
-          useUIStore.getState().setComposeDirty(false);
+          useComposeStore.getState().setComposeDirty(false);
           closeCompose();
         },
         onError: (e) => {

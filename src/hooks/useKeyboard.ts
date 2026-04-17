@@ -1,7 +1,8 @@
 import { useEffect, useRef } from "react";
 import { useShortcutStore } from "@/stores/shortcut.store";
 import { useCommandStore } from "@/stores/command.store";
-import { useUIStore, isComposeDirty } from "@/stores/ui.store";
+import { useUIStore } from "@/stores/ui.store";
+import { useComposeStore, isComposeDirty } from "@/stores/compose.store";
 import { useConfirmStore } from "@/stores/confirm.store";
 import { useMailStore } from "@/stores/mail.store";
 import { useToastStore } from "@/stores/toast.store";
@@ -40,7 +41,7 @@ function getCachedThreads(): ThreadSummary[] {
 }
 
 async function confirmLeaveCompose(): Promise<boolean> {
-  if (!isComposeDirty(useUIStore.getState())) return true;
+  if (!isComposeDirty()) return true;
   return useConfirmStore.getState().confirm({
     title: i18n.t("compose.discardDraft", "Discard draft"),
     message: i18n.t("compose.discardDraftConfirm", "You have an unsaved draft. Discard and leave?"),
@@ -104,7 +105,7 @@ export function useKeyboard() {
           if (useCommandStore.getState().isOpen) {
             useCommandStore.getState().close();
           } else if (useUIStore.getState().activeView === "compose") {
-            confirmLeaveCompose().then((ok) => { if (ok) useUIStore.getState().closeCompose(); });
+            confirmLeaveCompose().then((ok) => { if (ok) useComposeStore.getState().closeCompose(); });
           } else if (useUIStore.getState().activeView === "search") {
             useUIStore.getState().setActiveView("inbox");
           }
@@ -200,13 +201,13 @@ export function useKeyboard() {
           break;
         }
         case "compose-new":
-          useUIStore.getState().openCompose("new");
+          useComposeStore.getState().openCompose("new");
           break;
         case "reply": {
           const { selectedMessageId: selId } = useMailStore.getState();
           if (selId) {
             getMessage(selId).then((msg) => {
-              if (msg) useUIStore.getState().openCompose("reply", msg);
+              if (msg) useComposeStore.getState().openCompose("reply", msg);
             });
           }
           break;
@@ -215,7 +216,7 @@ export function useKeyboard() {
           const { selectedMessageId: selId } = useMailStore.getState();
           if (selId) {
             getMessage(selId).then((msg) => {
-              if (msg) useUIStore.getState().openCompose("reply-all", msg);
+              if (msg) useComposeStore.getState().openCompose("reply-all", msg);
             });
           }
           break;
@@ -224,7 +225,7 @@ export function useKeyboard() {
           const { selectedMessageId: selId } = useMailStore.getState();
           if (selId) {
             getMessage(selId).then((msg) => {
-              if (msg) useUIStore.getState().openCompose("forward", msg);
+              if (msg) useComposeStore.getState().openCompose("forward", msg);
             });
           }
           break;

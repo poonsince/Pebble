@@ -1,5 +1,6 @@
 import type { Command } from "@/stores/command.store";
 import { useUIStore } from "@/stores/ui.store";
+import { useComposeStore } from "@/stores/compose.store";
 import { useMailStore } from "@/stores/mail.store";
 import { useKanbanStore } from "@/stores/kanban.store";
 import { useToastStore } from "@/stores/toast.store";
@@ -90,7 +91,7 @@ export function buildCommands(t: (key: string, defaultValue: string) => string):
       id: "mail:compose",
       name: t("commands.composeNew", "Compose New Message"),
       category: t("commands.mail", "Mail"),
-      execute: () => useUIStore.getState().openCompose("new"),
+      execute: () => useComposeStore.getState().openCompose("new"),
     },
     // Settings
     {

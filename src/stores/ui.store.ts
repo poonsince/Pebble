@@ -1,6 +1,5 @@
 import { create } from "zustand";
 import i18n from "@/lib/i18n";
-import type { Message } from "@/lib/api";
 
 export type ActiveView = "inbox" | "kanban" | "settings" | "search" | "snoozed" | "starred" | "compose";
 export type Theme = "light" | "dark" | "system";
@@ -20,19 +19,6 @@ export function applyThemeToDom(theme: Theme) {
   document.documentElement.setAttribute("data-theme", resolveTheme(theme));
 }
 
-function getComposeResetState() {
-  return {
-    composeMode: null,
-    composeReplyTo: null,
-    composeDirty: false,
-  };
-}
-
-/** Check if compose view can be left without losing data (no dialog — just a state check). */
-export function isComposeDirty(state: Pick<UIState, "activeView" | "composeDirty">): boolean {
-  return state.activeView === "compose" && state.composeDirty;
-}
-
 interface UIState {
   sidebarCollapsed: boolean;
   activeView: ActiveView;
@@ -42,12 +28,6 @@ interface UIState {
   networkStatus: NetworkStatus;
   lastMailError: string | null;
   previousView: ActiveView;
-  composeMode: "new" | "reply" | "reply-all" | "forward" | null;
-  composeReplyTo: Message | null;
-  composeDirty: boolean;
-  showComposeLeaveConfirm: boolean;
-  pendingView: ActiveView | null;
-  setComposeDirty: (dirty: boolean) => void;
   toggleSidebar: () => void;
   setActiveView: (view: ActiveView) => void;
   setTheme: (theme: Theme) => void;
@@ -55,10 +35,6 @@ interface UIState {
   setSyncStatus: (status: "idle" | "syncing" | "error") => void;
   setNetworkStatus: (status: NetworkStatus) => void;
   setLastMailError: (error: string | null) => void;
-  openCompose: (mode: "new" | "reply" | "reply-all" | "forward", replyTo?: Message | null) => void;
-  closeCompose: () => void;
-  confirmCloseCompose: () => void;
-  cancelCloseCompose: () => void;
   pollInterval: number;
   setPollInterval: (secs: number) => void;
   searchQuery: string;
@@ -76,12 +52,6 @@ export const useUIStore = create<UIState>((set) => ({
   networkStatus: "online",
   lastMailError: null,
   previousView: "inbox",
-  composeMode: null,
-  composeReplyTo: null,
-  composeDirty: false,
-  showComposeLeaveConfirm: false,
-  pendingView: null,
-  setComposeDirty: (dirty) => set({ composeDirty: dirty }),
   toggleSidebar: () =>
     set((state) => ({ sidebarCollapsed: !state.sidebarCollapsed })),
   setActiveView: (view) => {
@@ -90,12 +60,20 @@ export const useUIStore = create<UIState>((set) => ({
       return;
     }
 
+    // Delegate dirty-compose guard to the compose store
     if (state.activeView === "compose" && view !== "compose") {
-      if (state.composeDirty) {
-        set({ showComposeLeaveConfirm: true, pendingView: view });
+      const { useComposeStore } = require("./compose.store");
+      const composeState = useComposeStore.getState();
+      if (composeState.composeDirty) {
+        useComposeStore.setState({ showComposeLeaveConfirm: true, pendingView: view });
         return;
       }
-      set({ activeView: view, ...getComposeResetState() });
+      useComposeStore.setState({
+        composeMode: null,
+        composeReplyTo: null,
+        composeDirty: false,
+      });
+      set({ activeView: view });
       return;
     }
 
@@ -114,41 +92,6 @@ export const useUIStore = create<UIState>((set) => ({
   setSyncStatus: (status) => set({ syncStatus: status }),
   setNetworkStatus: (status) => set({ networkStatus: status }),
   setLastMailError: (error) => set({ lastMailError: error }),
-  openCompose: (mode, replyTo = null) =>
-    set((state) => ({
-      previousView: state.activeView === "compose" ? state.previousView : state.activeView,
-      activeView: "compose" as ActiveView,
-      composeMode: mode,
-      composeReplyTo: replyTo,
-      composeDirty: false,
-    })),
-  closeCompose: () => {
-    const state = useUIStore.getState();
-    if (state.activeView !== "compose") {
-      return;
-    }
-
-    if (state.composeDirty) {
-      set({ showComposeLeaveConfirm: true, pendingView: null });
-      return;
-    }
-
-    set((current) => ({
-      activeView: current.previousView,
-      ...getComposeResetState(),
-    }));
-  },
-  confirmCloseCompose: () => {
-    const state = useUIStore.getState();
-    const targetView = state.pendingView ?? state.previousView;
-    set({
-      activeView: targetView,
-      showComposeLeaveConfirm: false,
-      pendingView: null,
-      ...getComposeResetState(),
-    });
-  },
-  cancelCloseCompose: () => set({ showComposeLeaveConfirm: false, pendingView: null }),
   pollInterval: Number(localStorage.getItem("pebble-poll-interval")) || 15,
   setPollInterval: (secs) => {
     localStorage.setItem("pebble-poll-interval", String(secs));
