@@ -1,5 +1,6 @@
 import { useToastStore } from "@/stores/toast.store";
 import { Check, X, AlertTriangle, Info } from "lucide-react";
+import { useTranslation } from "react-i18next";
 
 const iconMap = {
   success: Check,
@@ -14,6 +15,7 @@ const accentMap = {
 };
 
 export default function ToastContainer() {
+  const { t } = useTranslation();
   const toasts = useToastStore((s) => s.toasts);
   const removeToast = useToastStore((s) => s.removeToast);
 
@@ -22,7 +24,7 @@ export default function ToastContainer() {
   return (
     <div
       role="region"
-      aria-label="Notifications"
+      aria-label={t("common.notifications", "Notifications")}
       style={{
         position: "fixed",
         bottom: "56px",
@@ -90,7 +92,7 @@ export default function ToastContainer() {
               </button>
             )}
             <button
-              aria-label="Close notification"
+              aria-label={t("common.closeNotification", "Close notification")}
               onClick={() => removeToast(toast.id)}
               style={{
                 background: "none",

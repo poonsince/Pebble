@@ -72,6 +72,8 @@ export default function SnoozePopover({ messageId, onClose, onSnoozed }: Props) 
 
   return (
     <div
+      role="dialog"
+      aria-label={t("snooze.until", "Snooze until...")}
       style={{
         position: "absolute",
         top: "100%",
@@ -125,7 +127,7 @@ export default function SnoozePopover({ messageId, onClose, onSnoozed }: Props) 
         </button>
       ))}
       {error && (
-        <div style={{
+        <div role="alert" aria-live="assertive" style={{
           padding: "6px 10px",
           fontSize: "12px",
           color: "#ef4444",

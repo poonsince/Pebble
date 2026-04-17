@@ -114,11 +114,11 @@
 **Goal**: 满足基本 a11y 标准，补全 i18n，增强用户操作反馈
 **Success Criteria**: 所有模态框有焦点陷阱���所有交互元素有 ARIA 标签、零英文硬编码
 **Tests**: 键盘导航手动��试、屏幕阅读器测试
-**Status**: Not Started
+**Status**: Complete
 
 | # | 原始编号 | 问题 | 文件 | 工作量 |
 |---|----------|------|------|--------|
-| 6.1 | UX-01 | `EditAccountModal` ��加焦点陷阱（复用 `AccountSetup` ��式） | `AccountsTab.tsx:341-360` | 1h |
+| 6.1 | UX-01 | `EditAccountModal` 添加焦点陷阱（复用 `AccountSetup` 模式） | `AccountsTab.tsx:341-360` | 1h |
 | 6.2 | UX-02/03/04 | `RulesTab` 输入、`MessageItem` 复选框、`SnoozePopover` 添加 ARIA | 多文件 | 2h |
 | 6.3 | UX-06~17 | 批量添加 `aria-hidden`/`aria-pressed`/`role`/`htmlFor` | 12 个文件 | 3h |
 | 6.4 | FEAT-06 | 补充 14 个缺失 i18n 键（`en.json` + `zh.json`） | `locales/en.json`, `locales/zh.json` | 1h |

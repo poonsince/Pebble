@@ -17,6 +17,7 @@ import { useComposeRecipients } from "@/hooks/useComposeRecipients";
 import { useComposeDraft, loadDraftFromStorage, clearDraftStorage } from "@/hooks/useComposeDraft";
 import { deleteDraft } from "@/lib/api";
 import { useComposeEditor } from "@/hooks/useComposeEditor";
+import { useConfirmStore } from "@/stores/confirm.store";
 import { ModeButton, EditorToolbar, MarkdownToolbar, composeStyles } from "./ComposeToolbar";
 
 export default function ComposeView() {
@@ -96,8 +97,18 @@ export default function ComposeView() {
     return () => clearTimeout(timer);
   }, [sendError]);
 
-  function handleSend() {
+  async function handleSend() {
     if (!fromAccountId || to.length === 0) return;
+
+    if (!subject.trim()) {
+      const confirmed = await useConfirmStore.getState().confirm({
+        title: t("compose.noSubjectTitle", "No subject"),
+        message: t("compose.noSubjectConfirm", "Send without a subject?"),
+        confirmLabel: t("common.send", "Send"),
+      });
+      if (!confirmed) return;
+    }
+
     setSendError(null);
 
     let bodyHtml = "";
@@ -403,7 +414,15 @@ export default function ComposeView() {
                                 <div style={{ color: "var(--color-text-secondary)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{tpl.subject}</div>
                               </div>
                               <button
-                                onClick={(e) => { e.stopPropagation(); deleteTemplate(tpl.id); setTemplates(listTemplates()); }}
+                                onClick={async (e) => {
+                                  e.stopPropagation();
+                                  const confirmed = await useConfirmStore.getState().confirm({
+                                    title: t("compose.deleteTemplate", "Delete template"),
+                                    message: t("compose.deleteTemplate", "Delete template") + ` "${tpl.name}"?`,
+                                    destructive: true,
+                                  });
+                                  if (confirmed) { deleteTemplate(tpl.id); setTemplates(listTemplates()); }
+                                }}
                                 aria-label={t("compose.deleteTemplate", "Delete template")}
                                 title={t("compose.deleteTemplate", "Delete template")}
                                 style={{ border: "none", background: "none", cursor: "pointer", color: "var(--color-text-secondary)", padding: "2px" }}

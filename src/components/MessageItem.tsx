@@ -92,6 +92,7 @@ function MessageItem({ message, labels = [], isSelected, onClick, onToggleStar, 
           <input
             type="checkbox"
             checked={batchSelected}
+            aria-label={t("batch.selectMessage", "Select message")}
             onChange={(e) => {
               e.stopPropagation();
               onToggleBatchSelect?.(message.id);

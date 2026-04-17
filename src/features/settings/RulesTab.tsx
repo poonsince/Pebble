@@ -123,6 +123,10 @@ export default function RulesTab() {
       setError(t("rules.nameRequired"));
       return;
     }
+    if (form.conditions.some((c) => !c.value.trim())) {
+      setError(t("rules.conditionValueRequired", "Condition values cannot be empty."));
+      return;
+    }
 
     const conditionsJson = serializeConditions(form.conditions);
     const actionsJson = serializeActions(form.actions);
@@ -248,6 +252,7 @@ export default function RulesTab() {
     return (
       <div key={index} style={{ display: "flex", gap: "6px", alignItems: "center" }}>
         <select
+          aria-label={t("rules.conditionField", "Condition field")}
           value={condition.field}
           onChange={(e) => updateCondition(index, { field: e.target.value as ConditionField })}
           style={{ ...selectStyle, flex: "0 0 120px" }}
@@ -257,6 +262,7 @@ export default function RulesTab() {
           ))}
         </select>
         <select
+          aria-label={t("rules.conditionOp", "Condition operator")}
           value={condition.op}
           onChange={(e) => updateCondition(index, { op: e.target.value as ConditionOp })}
           style={{ ...selectStyle, flex: "0 0 130px" }}
@@ -267,6 +273,7 @@ export default function RulesTab() {
         </select>
         <input
           type="text"
+          aria-label={t("rules.conditionValue", "Condition value")}
           value={condition.value}
           onChange={(e) => updateCondition(index, { value: e.target.value })}
           placeholder={t("rules.valuePlaceholder", "Value")}
@@ -291,6 +298,7 @@ export default function RulesTab() {
     return (
       <div key={index} style={{ display: "flex", gap: "6px", alignItems: "center" }}>
         <select
+          aria-label={t("rules.actionType", "Action type")}
           value={action.type}
           onChange={(e) => {
             const newType = e.target.value as ActionType;
@@ -306,6 +314,7 @@ export default function RulesTab() {
         {needsValue && (
           action.type === "SetKanbanColumn" ? (
             <select
+              aria-label={t("rules.kanbanColumn", "Kanban column")}
               value={action.value || "todo"}
               onChange={(e) => updateAction(index, { value: e.target.value })}
               style={{ ...selectStyle, flex: 1 }}
@@ -317,6 +326,7 @@ export default function RulesTab() {
           ) : (
             <input
               type="text"
+              aria-label={t("rules.actionValue", "Action value")}
               value={action.value || ""}
               onChange={(e) => updateAction(index, { value: e.target.value })}
               placeholder={
@@ -358,8 +368,9 @@ export default function RulesTab() {
       >
         {/* Name */}
         <div>
-          <label style={labelStyle}>{t("rules.name")}</label>
+          <label htmlFor="rule-name" style={labelStyle}>{t("rules.name")}</label>
           <input
+            id="rule-name"
             type="text"
             value={form.name}
             onChange={(e) => setForm({ ...form, name: e.target.value })}
@@ -371,8 +382,9 @@ export default function RulesTab() {
         {/* Priority + Enabled row */}
         <div style={{ display: "flex", gap: "16px", alignItems: "flex-end" }}>
           <div style={{ flex: 1 }}>
-            <label style={labelStyle}>{t("rules.priority")}</label>
+            <label htmlFor="rule-priority" style={labelStyle}>{t("rules.priority")}</label>
             <input
+              id="rule-priority"
               type="number"
               value={form.priority}
               onChange={(e) => setForm({ ...form, priority: Number(e.target.value) })}
@@ -380,8 +392,10 @@ export default function RulesTab() {
             />
           </div>
           <div style={{ flex: 1 }}>
-            <label style={labelStyle}>{t("rules.enabled")}</label>
+            <label id="rule-enabled-label" style={labelStyle}>{t("rules.enabled")}</label>
             <button
+              aria-pressed={form.is_enabled}
+              aria-labelledby="rule-enabled-label"
               onClick={() => setForm({ ...form, is_enabled: !form.is_enabled })}
               style={{
                 width: "100%",
@@ -448,7 +462,7 @@ export default function RulesTab() {
 
         {/* Error */}
         {error && (
-          <p style={{ margin: 0, fontSize: "12px", color: "#ef4444" }}>{error}</p>
+          <p role="alert" style={{ margin: 0, fontSize: "12px", color: "#ef4444" }}>{error}</p>
         )}
 
         {/* Buttons */}

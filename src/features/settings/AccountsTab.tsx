@@ -321,6 +321,7 @@ function EditAccountModal({ account, onClose, onSaved }: {
   onSaved: () => void;
 }) {
   const { t } = useTranslation();
+  const dialogRef = useRef<HTMLDivElement>(null);
   const emailInputRef = useRef<HTMLInputElement>(null);
   const [displayName, setDisplayName] = useState(account.display_name);
   const [email, setEmail] = useState(account.email);
@@ -348,6 +349,21 @@ function EditAccountModal({ account, onClose, onSaved }: {
       if (event.key === "Escape") {
         event.preventDefault();
         onClose();
+        return;
+      }
+      if (event.key === "Tab" && dialogRef.current) {
+        const focusable = dialogRef.current.querySelectorAll<HTMLElement>(
+          'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+        );
+        const first = focusable[0];
+        const last = focusable[focusable.length - 1];
+        if (event.shiftKey && document.activeElement === first) {
+          event.preventDefault();
+          last.focus();
+        } else if (!event.shiftKey && document.activeElement === last) {
+          event.preventDefault();
+          first.focus();
+        }
       }
     }
 
@@ -394,6 +410,7 @@ function EditAccountModal({ account, onClose, onSaved }: {
 
   return (
     <div
+      ref={dialogRef}
       role="dialog"
       aria-modal="true"
       aria-labelledby="edit-account-title"

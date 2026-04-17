@@ -8,6 +8,7 @@ import { addAccount, startSync, testImapConnection, completeOAuthFlow } from "@/
 import type { AddAccountRequest } from "@/lib/api";
 import { accountsQueryKey } from "@/hooks/queries";
 import { extractErrorMessage } from "@/lib/extractErrorMessage";
+import { useToastStore } from "@/stores/toast.store";
 import { inputStyle, labelStyle } from "../styles/form";
 
 const PRESETS: Record<
@@ -209,6 +210,10 @@ export default function AccountSetup({ onClose }: Props) {
       // Invalidate accounts immediately so UI reflects the new account
       await queryClient.invalidateQueries({ queryKey: accountsQueryKey });
       onClose();
+      useToastStore.getState().addToast({
+        message: t("accountSetup.accountAdded", "Account added successfully"),
+        type: "success",
+      });
       // Start sync in background; poll folders until they appear
       startSync(account.id).catch((err) =>
         console.warn("Initial sync failed (will retry later):", err),

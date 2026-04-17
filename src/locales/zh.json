@@ -18,7 +18,13 @@
     "copied": "已复制",
     "copy": "复制",
     "remove": "移除",
-    "loadMore": "加载更多"
+    "loadMore": "加载更多",
+    "retry": "重试",
+    "notifications": "通知",
+    "closeNotification": "关闭通知",
+    "undo": "撤销",
+    "confirm": "确认",
+    "send": "发送"
   },
   "sidebar": {
     "inbox": "收件箱",
@@ -32,7 +38,11 @@
     "mail": "邮件",
     "compose": "撰写",
     "snoozed": "稍后提醒",
-    "starred": "星标邮件"
+    "starred": "星标邮件",
+    "navigation": "侧边栏",
+    "search": "搜索",
+    "mailFolders": "邮件文件夹",
+    "tools": "工具"
   },
   "inbox": {
     "searchPlaceholder": "搜索邮件...",
@@ -41,7 +51,8 @@
     "welcome": "欢迎使用 Pebble",
     "addAccountHint": "添加邮箱账户以开始使用",
     "messageView": "邮件视图",
-    "threadView": "会话视图"
+    "threadView": "会话视图",
+    "messageList": "邮件列表"
   },
   "compose": {
     "newMessage": "新邮件",
@@ -101,7 +112,12 @@
       "showPreview": "显示预览",
       "hidePreview": "隐藏预览",
       "preview": "预览"
-    }
+    },
+    "deleteTemplate": "删除模板",
+    "removeAttachment": "移除附件",
+    "noSubjectTitle": "无主题",
+    "noSubjectConfirm": "确定不填写主题直接发送？",
+    "invalidEmail": "邮箱地址格式无效"
   },
   "settings": {
     "accounts": "账户",
@@ -136,7 +152,9 @@
     "signature": "签名",
     "signaturePlaceholder": "输入邮件签名...",
     "optional": "可选",
-    "oauthAccountNote": "此账户使用 OAuth 登录 —— 密码、IMAP/SMTP 和代理由服务商管理，此处无法修改。"
+    "oauthAccountNote": "此账户使用 OAuth 登录 —— 密码、IMAP/SMTP 和代理由服务商管理，此处无法修改。",
+    "deleteAccountSuccess": "账户已成功移除",
+    "deleteAccountFailed": "移除账户失败"
   },
   "cloudSync": {
     "title": "设置备份",
@@ -303,7 +321,9 @@
     "done": "已完成",
     "dropHere": "将邮件拖放到这里",
     "clickToOpen": "点击打开邮件",
-    "cardAriaLabel": "{{subject}}，来自 {{sender}}。按 Enter 打开，空格拖动。"
+    "cardAriaLabel": "{{subject}}，来自 {{sender}}。按 Enter 打开，空格拖动。",
+    "removedFromBoard": "卡片已从看板移除",
+    "undoRemove": "撤销"
   },
   "accountSetup": {
     "title": "添加邮箱账户",
@@ -333,7 +353,10 @@
     "testSuccess": "连接测试通过",
     "testFailed": "连接测试失败",
     "emailPlaceholder": "you@example.com",
-    "namePlaceholder": "您的姓名"
+    "namePlaceholder": "您的姓名",
+    "discardTitle": "放弃更改？",
+    "discardConfirm": "您的更改将会丢失，确定放弃吗？",
+    "accountAdded": "账户添加成功"
   },
   "commands": {
     "navigation": "导航",
@@ -427,7 +450,15 @@
     "deleteRule": "删除规则",
     "deleteFailed": "删除规则失败",
     "confirmDelete": "删除规则「{{name}}」？此操作不可撤销。",
-    "priorityLabel": "优先级: {{value}}"
+    "priorityLabel": "优先级: {{value}}",
+    "fetchError": "加载规则失败",
+    "conditionField": "条件字段",
+    "conditionOp": "条件运算符",
+    "conditionValue": "条件值",
+    "actionType": "动作类型",
+    "actionValue": "动作值",
+    "kanbanColumn": "看板列",
+    "conditionValueRequired": "条件值不能为空。"
   },
   "translate": {
     "title": "翻译",
@@ -489,6 +520,12 @@
     "failed": "批量操作失败",
     "deleteTitle": "删除 {{count}} 封邮件？",
     "deleteConfirm": "将 {{count}} 封邮件移至废纸篓。可以从废纸篓恢复。",
-    "deleteButton": "删除"
+    "deleteButton": "删除",
+    "selectMessage": "选择邮件",
+    "star": "加星标",
+    "unstar": "取消星标"
+  },
+  "messageDetail": {
+    "body": "邮件正文"
   }
 }

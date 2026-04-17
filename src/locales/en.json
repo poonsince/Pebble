@@ -18,7 +18,13 @@
     "copied": "Copied",
     "copy": "Copy",
     "remove": "Remove",
-    "loadMore": "Load more"
+    "loadMore": "Load more",
+    "retry": "Retry",
+    "notifications": "Notifications",
+    "closeNotification": "Close notification",
+    "undo": "Undo",
+    "confirm": "Confirm",
+    "send": "Send"
   },
   "sidebar": {
     "inbox": "Inbox",
@@ -32,7 +38,11 @@
     "mail": "Mail",
     "compose": "Compose",
     "snoozed": "Snoozed",
-    "starred": "Starred"
+    "starred": "Starred",
+    "navigation": "Sidebar",
+    "search": "Search",
+    "mailFolders": "Mail folders",
+    "tools": "Tools"
   },
   "inbox": {
     "searchPlaceholder": "Search messages...",
@@ -41,7 +51,8 @@
     "welcome": "Welcome to Pebble",
     "addAccountHint": "Add an email account to get started",
     "messageView": "Message view",
-    "threadView": "Thread view"
+    "threadView": "Thread view",
+    "messageList": "Message list"
   },
   "compose": {
     "newMessage": "New Message",
@@ -101,7 +112,12 @@
       "showPreview": "Show preview",
       "hidePreview": "Hide preview",
       "preview": "Preview"
-    }
+    },
+    "deleteTemplate": "Delete template",
+    "removeAttachment": "Remove attachment",
+    "noSubjectTitle": "No subject",
+    "noSubjectConfirm": "Send without a subject?",
+    "invalidEmail": "Invalid email address"
   },
   "settings": {
     "accounts": "Accounts",
@@ -136,7 +152,9 @@
     "optional": "optional",
     "signature": "Signature",
     "signaturePlaceholder": "Your email signature...",
-    "oauthAccountNote": "This account uses OAuth — sign-in, password, IMAP/SMTP, and proxy are managed by the provider and not editable here."
+    "oauthAccountNote": "This account uses OAuth — sign-in, password, IMAP/SMTP, and proxy are managed by the provider and not editable here.",
+    "deleteAccountSuccess": "Account removed successfully",
+    "deleteAccountFailed": "Failed to remove account"
   },
   "cloudSync": {
     "title": "Settings Backup",
@@ -303,7 +321,9 @@
     "done": "Done",
     "dropHere": "Drop messages here",
     "clickToOpen": "Click to open message",
-    "cardAriaLabel": "{{subject}} from {{sender}}. Press Enter to open, Space to drag."
+    "cardAriaLabel": "{{subject}} from {{sender}}. Press Enter to open, Space to drag.",
+    "removedFromBoard": "Card removed from board",
+    "undoRemove": "Undo"
   },
   "accountSetup": {
     "title": "Add Email Account",
@@ -333,7 +353,10 @@
     "testSuccess": "Connection test passed",
     "testFailed": "Connection test failed",
     "emailPlaceholder": "you@example.com",
-    "namePlaceholder": "Your Name"
+    "namePlaceholder": "Your Name",
+    "discardTitle": "Discard changes?",
+    "discardConfirm": "Your changes will be lost. Are you sure?",
+    "accountAdded": "Account added successfully"
   },
   "commands": {
     "navigation": "Navigation",
@@ -427,7 +450,15 @@
     "deleteRule": "Delete rule",
     "deleteFailed": "Failed to delete rule",
     "confirmDelete": "Delete rule \"{{name}}\"? This cannot be undone.",
-    "priorityLabel": "Priority: {{value}}"
+    "priorityLabel": "Priority: {{value}}",
+    "fetchError": "Failed to load rules",
+    "conditionField": "Condition field",
+    "conditionOp": "Condition operator",
+    "conditionValue": "Condition value",
+    "actionType": "Action type",
+    "actionValue": "Action value",
+    "kanbanColumn": "Kanban column",
+    "conditionValueRequired": "Condition values cannot be empty."
   },
   "translate": {
     "title": "Translation",
@@ -489,6 +520,12 @@
     "failed": "Batch operation failed",
     "deleteTitle": "Delete {{count}} messages?",
     "deleteConfirm": "This will move {{count}} message(s) to Trash. This action can be undone by restoring from Trash.",
-    "deleteButton": "Delete"
+    "deleteButton": "Delete",
+    "selectMessage": "Select message",
+    "star": "Star",
+    "unstar": "Unstar"
+  },
+  "messageDetail": {
+    "body": "Message body"
   }
 }

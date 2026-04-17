@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useCallback, useId } from "react";
 import { useTranslation } from "react-i18next";
 import { searchContacts, type KnownContact } from "@/lib/api";
+import { useToastStore } from "@/stores/toast.store";
 
 interface ContactAutocompleteProps {
   value: string[];
@@ -74,10 +75,15 @@ export default function ContactAutocomplete({
 
   const addRawAddress = (text: string) => {
     const trimmed = text.trim();
-    // Basic email format validation
+    if (!trimmed) { setInputValue(""); return; }
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (trimmed && emailRegex.test(trimmed) && !value.includes(trimmed)) {
+    if (emailRegex.test(trimmed) && !value.includes(trimmed)) {
       onChange([...value, trimmed]);
+    } else if (!emailRegex.test(trimmed)) {
+      useToastStore.getState().addToast({
+        message: t("compose.invalidEmail", "Invalid email address"),
+        type: "error",
+      });
     }
     setInputValue("");
     setSuggestions([]);

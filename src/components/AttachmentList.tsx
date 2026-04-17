@@ -158,6 +158,7 @@ export default function AttachmentList({ messageId }: Props) {
                 <button
                   onClick={() => handleDownload(attachment)}
                   disabled={isDownloading}
+                  aria-label={t("attachments.download") + ": " + attachment.filename}
                   title={isDownloading ? t("attachments.downloading") : downloadedPaths[attachment.id] ? downloadedPaths[attachment.id] : t("attachments.download")}
                   style={{
                     background: "none",

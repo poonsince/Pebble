@@ -130,7 +130,7 @@ function ViewLoadingFallback() {
       color: "var(--color-text-secondary)",
       fontSize: "13px",
     }}>
-      Loading...
+      {i18next.t("common.loading", "Loading...")}
     </div>
   );
 }
@@ -161,7 +161,7 @@ class ViewErrorBoundary extends Component<
           <p style={{ fontSize: 12, margin: 0, color: "var(--color-text-secondary)" }}>
             {i18next.t("errorBoundary.description", "Please try again or refresh the application.")}
           </p>
-          {this.state.error && (
+          {this.state.error && import.meta.env.DEV && (
             <pre style={{ fontSize: 11, color: "#ef4444", maxWidth: "90%", overflow: "auto", whiteSpace: "pre-wrap", textAlign: "left" }}>
               {this.state.error.message}
               {"\n"}

@@ -3,8 +3,9 @@ import { useTranslation } from "react-i18next";
 import { DndContext, DragEndEvent, KeyboardSensor, PointerSensor, useSensor, useSensors } from "@dnd-kit/core";
 import { arrayMove, sortableKeyboardCoordinates } from "@dnd-kit/sortable";
 import type { KanbanColumnType, Message } from "@/lib/api";
-import { getMessagesBatch } from "@/lib/api";
+import { getMessagesBatch, moveToKanban } from "@/lib/api";
 import { useKanbanStore } from "@/stores/kanban.store";
+import { useToastStore } from "@/stores/toast.store";
 import { useUIStore } from "@/stores/ui.store";
 import { useMailStore } from "@/stores/mail.store";
 import KanbanColumn from "./KanbanColumn";
@@ -92,6 +93,22 @@ export default function KanbanView() {
     }
   }
 
+  async function handleRemove(messageId: string) {
+    const card = cards.find((c) => c.message_id === messageId);
+    const oldColumn = card?.column ?? "todo";
+    await removeCard(messageId);
+    useToastStore.getState().addToast({
+      message: t("kanban.removedFromBoard", "Card removed from board"),
+      type: "info",
+      action: {
+        label: t("kanban.undoRemove", "Undo"),
+        onClick: () => {
+          moveToKanban(messageId, oldColumn).then(() => fetchCards());
+        },
+      },
+    });
+  }
+
   if (loading && cards.length === 0) {
     return <KanbanSkeleton />;
   }
@@ -106,7 +123,7 @@ export default function KanbanView() {
             title={t(col.titleKey)}
             cardIds={cards.filter((c) => c.column === col.id).map((c) => c.message_id)}
             messages={messages}
-            onRemove={removeCard}
+            onRemove={handleRemove}
             onOpen={handleOpenMessage}
           />
         ))}
