@@ -5,6 +5,7 @@ pub mod imap;
 pub mod outlook_sync;
 pub mod parser;
 pub mod provider;
+pub mod realtime_policy;
 pub mod reconcile;
 pub mod smtp;
 pub mod sync;

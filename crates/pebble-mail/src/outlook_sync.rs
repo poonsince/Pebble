@@ -12,6 +12,7 @@ use tracing::{info, warn};
 use crate::backoff::SyncBackoff;
 use crate::provider::outlook::OutlookProvider;
 use crate::gmail_sync::TokenRefresher;
+use crate::realtime_policy::{RealtimeContext, RealtimePollPolicy};
 use crate::sync::{StoredMessage, SyncConfig, SyncError, SyncWorkerBase, persist_message_attachments_async};
 use crate::thread::compute_thread_id;
 
@@ -124,7 +125,10 @@ impl OutlookSyncWorker {
 
     /// Main sync loop.
     pub async fn run(&self, config: SyncConfig, mut stop_rx: watch::Receiver<bool>) {
-        let poll_interval = tokio::time::Duration::from_secs(config.poll_interval_secs);
+        let policy = RealtimePollPolicy {
+            foreground_recent_secs: config.poll_interval_secs.clamp(1, 10),
+            ..RealtimePollPolicy::default()
+        };
         let mut backoff = SyncBackoff::new();
 
         loop {
@@ -174,7 +178,15 @@ impl OutlookSyncWorker {
                             self.base.account_id, backoff.failure_count(), delay
                         );
                     }
-                    let wait = if backoff.is_circuit_open() { delay } else { poll_interval };
+                    let wait = if backoff.is_circuit_open() {
+                        delay
+                    } else {
+                        policy.next_delay(RealtimeContext {
+                            app_foreground: true,
+                            recent_activity: true,
+                            consecutive_failures: backoff.failure_count(),
+                        })
+                    };
                     let _ = tokio::time::timeout(wait, stop_rx.changed()).await;
                     continue;
                 }
@@ -294,7 +306,12 @@ impl OutlookSyncWorker {
             }
 
             // Wait for next poll or stop signal
-            let _ = tokio::time::timeout(poll_interval, stop_rx.changed()).await;
+            let wait = policy.next_delay(RealtimeContext {
+                app_foreground: true,
+                recent_activity: true,
+                consecutive_failures: backoff.failure_count(),
+            });
+            let _ = tokio::time::timeout(wait, stop_rx.changed()).await;
         }
 
         info!("Outlook sync task completed for account {}", self.base.account_id);

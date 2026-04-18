@@ -13,6 +13,7 @@ use tracing::{debug, error, info, warn};
 
 use crate::backoff::SyncBackoff;
 use crate::provider::gmail::{visible_label_ids, GmailFetchedMessage, GmailMessageRef, GmailProvider};
+use crate::realtime_policy::{RealtimeContext, RealtimePollPolicy};
 use crate::sync::{
     persist_message_attachments_async, StoredMessage, SyncConfig, SyncError, SyncWorkerBase,
 };
@@ -805,8 +806,6 @@ impl GmailSyncWorker {
 
     /// Main sync loop.
     pub async fn run(&self, config: SyncConfig) {
-        let poll_interval = tokio::time::Duration::from_secs(config.poll_interval_secs);
-
         // Ensure token is valid before starting
         if let Err(e) = self.ensure_valid_token().await {
             error!(
@@ -829,11 +828,20 @@ impl GmailSyncWorker {
             // Don't return — still enter poll loop so we can retry
         }
 
-        let mut poll_ticker = tokio::time::interval(poll_interval);
+        let policy = RealtimePollPolicy {
+            foreground_recent_secs: config.poll_interval_secs.clamp(1, 10),
+            ..RealtimePollPolicy::default()
+        };
         let mut stop_rx = self.stop_rx.clone();
         let mut backoff = SyncBackoff::new();
 
         loop {
+            let next_delay = policy.next_delay(RealtimeContext {
+                app_foreground: true,
+                recent_activity: true,
+                consecutive_failures: backoff.failure_count(),
+            });
+
             tokio::select! {
                 _ = stop_rx.changed() => {
                     if *stop_rx.borrow() {
@@ -841,17 +849,12 @@ impl GmailSyncWorker {
                         break;
                     }
                 }
-                _ = poll_ticker.tick() => {
+                _ = tokio::time::sleep(next_delay) => {
                     if backoff.is_circuit_open() {
-                        let delay = backoff.current_delay();
                         warn!(
-                            "Circuit open for Gmail account {} ({} failures), waiting {:?}",
-                            self.base.account_id, backoff.failure_count(), delay
+                            "Circuit open for Gmail account {} ({} failures), adaptive wait {:?}",
+                            self.base.account_id, backoff.failure_count(), next_delay
                         );
-                        match tokio::time::timeout(delay, stop_rx.changed()).await {
-                            Ok(Ok(())) if *stop_rx.borrow() => break,
-                            _ => {}
-                        }
                         continue;
                     }
 
