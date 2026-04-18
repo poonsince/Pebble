@@ -507,7 +507,6 @@ function EditAccountModal({ account, onClose, onSaved }: {
                       <option value="">{t("settings.leaveEmptyKeep", "keep current")}</option>
                       <option value="tls">{t("accountSetup.securityTls", "SSL/TLS")}</option>
                       <option value="starttls">{t("accountSetup.securityStarttls", "STARTTLS")}</option>
-                      <option value="plain">{t("accountSetup.securityPlain", "None")}</option>
                     </select>
                   </div>
                 </div>
@@ -527,7 +526,6 @@ function EditAccountModal({ account, onClose, onSaved }: {
                       <option value="">{t("settings.leaveEmptyKeep", "keep current")}</option>
                       <option value="tls">{t("accountSetup.securityTls", "SSL/TLS")}</option>
                       <option value="starttls">{t("accountSetup.securityStarttls", "STARTTLS")}</option>
-                      <option value="plain">{t("accountSetup.securityPlain", "None")}</option>
                     </select>
                   </div>
                 </div>

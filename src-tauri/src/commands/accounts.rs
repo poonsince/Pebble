@@ -1,10 +1,10 @@
-use crate::state::AppState;
 use crate::commands::oauth::ensure_account_oauth_tokens;
-use pebble_core::{Account, PebbleError, ProviderType, new_id, now_timestamp};
-use pebble_mail::{ConnectionSecurity, ImapConfig, ProxyConfig, SmtpConfig};
+use crate::state::AppState;
+use pebble_core::traits::FolderProvider;
+use pebble_core::{new_id, now_timestamp, Account, PebbleError, ProviderType};
 use pebble_mail::GmailProvider;
 use pebble_mail::OutlookProvider;
-use pebble_core::traits::FolderProvider;
+use pebble_mail::{ConnectionSecurity, ImapConfig, ProxyConfig, SmtpConfig};
 use serde::{Deserialize, Serialize};
 use tauri::State;
 
@@ -18,6 +18,29 @@ use tauri::State;
 struct AccountCredentials {
     imap: ImapConfig,
     smtp: SmtpConfig,
+}
+
+fn is_loopback_mail_host(host: &str) -> bool {
+    matches!(
+        host.trim()
+            .trim_matches(&['[', ']'][..])
+            .to_ascii_lowercase()
+            .as_str(),
+        "localhost" | "127.0.0.1" | "::1"
+    )
+}
+
+fn validate_connection_security(
+    label: &str,
+    host: &str,
+    security: &ConnectionSecurity,
+) -> std::result::Result<(), PebbleError> {
+    if matches!(security, ConnectionSecurity::Plain) && !is_loopback_mail_host(host) {
+        return Err(PebbleError::Validation(format!(
+            "{label} plaintext connections are only allowed for localhost"
+        )));
+    }
+    Ok(())
 }
 
 #[allow(dead_code)]
@@ -61,6 +84,9 @@ pub async fn add_account(
         "outlook" => ProviderType::Outlook,
         _ => ProviderType::Imap,
     };
+
+    validate_connection_security("IMAP", &request.imap_host, &request.imap_security)?;
+    validate_connection_security("SMTP", &request.smtp_host, &request.smtp_security)?;
 
     let account = Account {
         id: new_id(),
@@ -142,13 +168,19 @@ pub async fn update_account(
     proxy_host: Option<String>,
     proxy_port: Option<u16>,
 ) -> std::result::Result<(), PebbleError> {
-    state.store.update_account(&account_id, &email, &display_name)?;
-
-    let credentials_dirty = password.is_some() || imap_host.is_some() || smtp_host.is_some()
-        || imap_port.is_some() || smtp_port.is_some()
-        || imap_security.is_some() || smtp_security.is_some()
-        || proxy_host.is_some() || proxy_port.is_some();
+    let credentials_dirty = password.is_some()
+        || imap_host.is_some()
+        || smtp_host.is_some()
+        || imap_port.is_some()
+        || smtp_port.is_some()
+        || imap_security.is_some()
+        || smtp_security.is_some()
+        || proxy_host.is_some()
+        || proxy_port.is_some();
     if !credentials_dirty {
+        state
+            .store
+            .update_account(&account_id, &email, &display_name)?;
         return Ok(());
     }
 
@@ -182,15 +214,24 @@ pub async fn update_account(
     };
 
     // IMAP side
-    if let Some(h) = imap_host { creds.imap.host = h; }
-    if let Some(p) = imap_port { creds.imap.port = p; }
-    if let Some(ref pw) = password { creds.imap.password = pw.clone(); }
-    if let Some(sec) = imap_security { creds.imap.security = sec; }
+    if let Some(h) = imap_host {
+        creds.imap.host = h;
+    }
+    if let Some(p) = imap_port {
+        creds.imap.port = p;
+    }
+    if let Some(ref pw) = password {
+        creds.imap.password = pw.clone();
+    }
+    if let Some(sec) = imap_security {
+        creds.imap.security = sec;
+    }
     if proxy_host.is_some() || proxy_port.is_some() {
         creds.imap.proxy = match (&proxy_host, &proxy_port) {
-            (Some(h), Some(p)) if !h.is_empty() => {
-                Some(ProxyConfig { host: h.clone(), port: *p })
-            }
+            (Some(h), Some(p)) if !h.is_empty() => Some(ProxyConfig {
+                host: h.clone(),
+                port: *p,
+            }),
             _ => None,
         };
     }
@@ -199,10 +240,18 @@ pub async fn update_account(
     }
 
     // SMTP side
-    if let Some(h) = smtp_host { creds.smtp.host = h; }
-    if let Some(p) = smtp_port { creds.smtp.port = p; }
-    if let Some(ref pw) = password { creds.smtp.password = pw.clone(); }
-    if let Some(sec) = smtp_security { creds.smtp.security = sec; }
+    if let Some(h) = smtp_host {
+        creds.smtp.host = h;
+    }
+    if let Some(p) = smtp_port {
+        creds.smtp.port = p;
+    }
+    if let Some(ref pw) = password {
+        creds.smtp.password = pw.clone();
+    }
+    if let Some(sec) = smtp_security {
+        creds.smtp.security = sec;
+    }
     // Mirror IMAP proxy to SMTP — both connections share the same network path.
     if proxy_host.is_some() || proxy_port.is_some() {
         creds.smtp.proxy = creds.imap.proxy.clone();
@@ -210,6 +259,13 @@ pub async fn update_account(
     if creds.smtp.username.is_empty() {
         creds.smtp.username = email.clone();
     }
+
+    validate_connection_security("IMAP", &creds.imap.host, &creds.imap.security)?;
+    validate_connection_security("SMTP", &creds.smtp.host, &creds.smtp.security)?;
+
+    state
+        .store
+        .update_account(&account_id, &email, &display_name)?;
 
     let config_bytes = serde_json::to_vec(&creds)
         .map_err(|e| PebbleError::Internal(format!("Failed to serialize config: {e}")))?;
@@ -238,6 +294,8 @@ pub struct TestConnectionRequest {
 pub async fn test_imap_connection(
     request: TestConnectionRequest,
 ) -> std::result::Result<String, PebbleError> {
+    validate_connection_security("IMAP", &request.imap_host, &request.imap_security)?;
+
     let proxy = match (request.proxy_host, request.proxy_port) {
         (Some(h), Some(p)) if !h.is_empty() => Some(pebble_mail::ProxyConfig { host: h, port: p }),
         _ => None,
@@ -290,14 +348,20 @@ pub async fn test_account_connection(
         ));
     }
 
-    let existing = state.store.get_auth_data(&account_id)?
+    let existing = state
+        .store
+        .get_auth_data(&account_id)?
         .ok_or_else(|| PebbleError::Internal("No auth data found".into()))?;
     let decrypted = state.crypto.decrypt(&existing)?;
     let config: serde_json::Value = serde_json::from_slice(&decrypted)
         .map_err(|e| PebbleError::Internal(format!("Failed to parse config: {e}")))?;
     let imap_config: pebble_mail::ImapConfig = serde_json::from_value(
-        config.get("imap").cloned().ok_or_else(|| PebbleError::Internal("No IMAP config".into()))?
-    ).map_err(|e| PebbleError::Internal(format!("Failed to parse IMAP config: {e}")))?;
+        config
+            .get("imap")
+            .cloned()
+            .ok_or_else(|| PebbleError::Internal("No IMAP config".into()))?,
+    )
+    .map_err(|e| PebbleError::Internal(format!("Failed to parse IMAP config: {e}")))?;
     pebble_mail::ImapProvider::test_connection(&imap_config).await
 }
 
@@ -326,7 +390,9 @@ pub async fn delete_account(
     let message_ids = match state.store.list_message_ids_by_account(&account_id) {
         Ok(ids) => ids,
         Err(e) => {
-            tracing::warn!("Failed to collect message IDs for attachment cleanup (account {account_id}): {e}");
+            tracing::warn!(
+                "Failed to collect message IDs for attachment cleanup (account {account_id}): {e}"
+            );
             Vec::new()
         }
     };
@@ -351,9 +417,33 @@ pub async fn delete_account(
                 }
             }
         }
-    }).await {
+    })
+    .await
+    {
         tracing::warn!("Attachment cleanup task failed for account {account_id_for_log}: {e}");
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rejects_plaintext_security_for_remote_hosts() {
+        let err =
+            validate_connection_security("IMAP", "mail.example.com", &ConnectionSecurity::Plain)
+                .expect_err("remote plaintext mail connections must be rejected");
+
+        assert!(matches!(err, PebbleError::Validation(_)));
+    }
+
+    #[test]
+    fn allows_plaintext_security_for_localhost() {
+        validate_connection_security("IMAP", "localhost", &ConnectionSecurity::Plain)
+            .expect("localhost plaintext is useful for local test servers");
+        validate_connection_security("SMTP", "127.0.0.1", &ConnectionSecurity::Plain)
+            .expect("loopback plaintext is useful for local test servers");
+    }
 }

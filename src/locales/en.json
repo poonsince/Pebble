@@ -226,7 +226,7 @@
   "about": {
     "title": "About",
     "version": "Version",
-    "description": "A privacy-first desktop email client built with Rust and React. Mail, search index, and attachments stay on your device. No telemetry. Optional features like translation send only the selected text to the provider you configure.",
+    "description": "A local-first desktop email client built with Rust and React. Mail, search index, and attachments stay on your device. No telemetry. Outbound traffic happens only when you use a feature that requires it: mail sync with your provider, translation, WebDAV settings backup, external message images you choose to load, or a manual GitHub update check.",
     "features": "Supports Gmail, Outlook, and IMAP accounts. Includes Kanban board, full-text search, snooze, rules engine, built-in translation, and optional WebDAV settings backup.",
     "license": "Open source under AGPL-3.0 license.",
     "updates": "Updates",

@@ -7,6 +7,10 @@ interface ContactAutocompleteProps {
   value: string[];
   onChange: (addresses: string[]) => void;
   accountId: string;
+  id?: string;
+  name?: string;
+  ariaLabelledBy?: string;
+  autoComplete?: string;
   placeholder?: string;
 }
 
@@ -14,6 +18,10 @@ export default function ContactAutocomplete({
   value,
   onChange,
   accountId,
+  id,
+  name,
+  ariaLabelledBy,
+  autoComplete = "email",
   placeholder,
 }: ContactAutocompleteProps) {
   const { t } = useTranslation();
@@ -214,8 +222,11 @@ export default function ContactAutocomplete({
           </span>
         ))}
         <input
+          id={id}
+          name={name}
           ref={inputRef}
           type="text"
+          autoComplete={autoComplete}
           value={inputValue}
           onChange={(e) => handleInputChange(e.target.value)}
           onKeyDown={handleKeyDown}
@@ -226,6 +237,7 @@ export default function ContactAutocomplete({
           }}
           placeholder={value.length === 0 ? placeholder : undefined}
           role="combobox"
+          aria-labelledby={ariaLabelledBy}
           aria-autocomplete="list"
           aria-expanded={showDropdown && suggestions.length > 0}
           aria-controls={`${instanceId}-listbox`}

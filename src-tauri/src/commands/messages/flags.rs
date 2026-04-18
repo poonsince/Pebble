@@ -6,7 +6,8 @@ use serde_json::json;
 use tauri::State;
 
 use super::{
-    connect_gmail, connect_outlook, load_imap_config, queue_pending_remote_op, queued_remote_error,
+    connect_gmail, connect_outlook, load_imap_config, queue_pending_remote_op,
+    queue_pending_remote_op_for_local_commit, queued_remote_error,
     remote_mutation_allows_local_commit, RemoteMutationOutcome,
 };
 
@@ -131,7 +132,7 @@ pub async fn update_message_flags(
                     },
                     Err(e) => {
                         let error = e.to_string();
-                        let outcome = queue_pending_remote_op(
+                        let outcome = queue_pending_remote_op_for_local_commit(
                             &state,
                             &msg,
                             "update_flags",
@@ -203,7 +204,7 @@ pub async fn update_message_flags(
                 }
                 Err(e) => {
                     let error = e.to_string();
-                    let outcome = queue_pending_remote_op(
+                    let outcome = queue_pending_remote_op_for_local_commit(
                         &state,
                         &msg,
                         "update_flags",
@@ -257,7 +258,7 @@ pub async fn update_message_flags(
                     }
                     Err(e) => {
                         let error = e.to_string();
-                        let outcome = queue_pending_remote_op(
+                        let outcome = queue_pending_remote_op_for_local_commit(
                             &state,
                             &msg,
                             "update_flags",

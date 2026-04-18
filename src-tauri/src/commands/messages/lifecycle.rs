@@ -8,8 +8,9 @@ use tracing::{info, warn};
 use super::provider_dispatch::{parse_imap_uid, ConnectedProvider};
 use super::{
     connect_gmail, connect_imap, connect_outlook, find_folder_by_role, find_message_folder,
-    queue_pending_remote_op, queued_remote_error, refresh_search_document,
-    remote_mutation_allows_local_commit, remove_search_documents, RemoteMutationOutcome,
+    queue_pending_remote_op, queue_pending_remote_op_for_local_commit, queued_remote_error,
+    refresh_search_document, remote_mutation_allows_local_commit, remove_search_documents,
+    RemoteMutationOutcome,
 };
 use serde_json::json;
 
@@ -110,7 +111,7 @@ pub async fn archive_message(
                     },
                     Err(e) => {
                         let error = e.to_string();
-                        let outcome = queue_pending_remote_op(
+                        let outcome = queue_pending_remote_op_for_local_commit(
                             &state,
                             &msg,
                             "unarchive",
@@ -156,7 +157,7 @@ pub async fn archive_message(
                     },
                     Err(e) => {
                         let error = e.to_string();
-                        let outcome = queue_pending_remote_op(
+                        let outcome = queue_pending_remote_op_for_local_commit(
                             &state,
                             &msg,
                             "unarchive",
@@ -209,7 +210,7 @@ pub async fn archive_message(
                         }
                         Err(e) => {
                             let error = e.to_string();
-                            let outcome = queue_pending_remote_op(
+                            let outcome = queue_pending_remote_op_for_local_commit(
                                 &state,
                                 &msg,
                                 "unarchive",
@@ -277,7 +278,7 @@ pub async fn archive_message(
                         },
                         Err(e) => {
                             let error = e.to_string();
-                            let outcome = queue_pending_remote_op(
+                            let outcome = queue_pending_remote_op_for_local_commit(
                                 &state,
                                 &msg,
                                 "archive",
@@ -323,7 +324,7 @@ pub async fn archive_message(
                         },
                         Err(e) => {
                             let error = e.to_string();
-                            let outcome = queue_pending_remote_op(
+                            let outcome = queue_pending_remote_op_for_local_commit(
                                 &state,
                                 &msg,
                                 "archive",
@@ -380,7 +381,7 @@ pub async fn archive_message(
                             }
                             Err(e) => {
                                 let error = e.to_string();
-                                let outcome = queue_pending_remote_op(
+                                let outcome = queue_pending_remote_op_for_local_commit(
                                     &state,
                                     &msg,
                                     "archive",
@@ -443,7 +444,7 @@ pub async fn archive_message(
                     },
                     Err(e) => {
                         let error = e.to_string();
-                        let outcome = queue_pending_remote_op(
+                        let outcome = queue_pending_remote_op_for_local_commit(
                             &state,
                             &msg,
                             "archive",
@@ -526,7 +527,12 @@ pub async fn delete_message(
             }
             Err(e) => {
                 let error = e.to_string();
-                let outcome = queue_pending_remote_op(
+                let queue_remote_op = if is_permanent {
+                    queue_pending_remote_op
+                } else {
+                    queue_pending_remote_op_for_local_commit
+                };
+                let outcome = queue_remote_op(
                     &state,
                     &msg,
                     if is_permanent {
@@ -584,7 +590,12 @@ pub async fn delete_message(
             }
             Err(e) => {
                 let error = e.to_string();
-                let outcome = queue_pending_remote_op(
+                let queue_remote_op = if is_permanent {
+                    queue_pending_remote_op
+                } else {
+                    queue_pending_remote_op_for_local_commit
+                };
+                let outcome = queue_remote_op(
                     &state,
                     &msg,
                     if is_permanent {
@@ -659,7 +670,12 @@ pub async fn delete_message(
                     }
                     Err(e) => {
                         let error = e.to_string();
-                        let outcome = queue_pending_remote_op(
+                        let queue_remote_op = if is_permanent {
+                            queue_pending_remote_op
+                        } else {
+                            queue_pending_remote_op_for_local_commit
+                        };
+                        let outcome = queue_remote_op(
                             &state,
                             &msg,
                             if is_permanent {
@@ -763,7 +779,7 @@ pub async fn restore_message(
             }
             Err(e) => {
                 let error = e.to_string();
-                let outcome = queue_pending_remote_op(
+                let outcome = queue_pending_remote_op_for_local_commit(
                     &state,
                     &msg,
                     "restore",
@@ -806,7 +822,7 @@ pub async fn restore_message(
             },
             Err(e) => {
                 let error = e.to_string();
-                let outcome = queue_pending_remote_op(
+                let outcome = queue_pending_remote_op_for_local_commit(
                     &state,
                     &msg,
                     "restore",
@@ -866,7 +882,7 @@ pub async fn restore_message(
                     }
                     Err(e) => {
                         let error = e.to_string();
-                        let outcome = queue_pending_remote_op(
+                        let outcome = queue_pending_remote_op_for_local_commit(
                             &state,
                             &msg,
                             "restore",
@@ -939,6 +955,12 @@ pub async fn move_to_folder(
             queue_pending_remote_op(&state, &msg, "move_to_folder", payload, error)?;
             Err(queued_remote_error("move_to_folder", error))
         };
+    let queue_move_connection_failure =
+        |error: &str,
+         payload: serde_json::Value|
+         -> std::result::Result<RemoteMutationOutcome, PebbleError> {
+            queue_pending_remote_op_for_local_commit(&state, &msg, "move_to_folder", payload, error)
+        };
 
     let outcome = match provider_type {
         ProviderType::Outlook => {
@@ -964,7 +986,7 @@ pub async fn move_to_folder(
                     },
                     Err(e) => {
                         let error = e.to_string();
-                        return queue_move_failure(&error, base_payload());
+                        queue_move_connection_failure(&error, base_payload())?
                     }
                 }
             }
@@ -995,7 +1017,7 @@ pub async fn move_to_folder(
                     }
                     Err(e) => {
                         let error = e.to_string();
-                        return queue_move_failure(&error, base_payload());
+                        queue_move_connection_failure(&error, base_payload())?
                     }
                 }
             } else {
@@ -1031,7 +1053,7 @@ pub async fn move_to_folder(
                     },
                     Err(e) => {
                         let error = e.to_string();
-                        return queue_move_failure(&error, move_payload());
+                        queue_move_connection_failure(&error, move_payload())?
                     }
                 }
             }
@@ -1211,12 +1233,15 @@ mod remote_mutation_tests {
     use super::*;
 
     #[test]
-    fn remote_mutation_allows_local_commit_only_after_remote_ack_or_local_only() {
+    fn remote_mutation_allows_local_commit_after_remote_ack_local_only_or_offline_queue() {
         assert!(remote_mutation_allows_local_commit(
             RemoteMutationOutcome::Applied
         ));
         assert!(remote_mutation_allows_local_commit(
             RemoteMutationOutcome::LocalOnly
+        ));
+        assert!(remote_mutation_allows_local_commit(
+            RemoteMutationOutcome::QueuedLocalCommit
         ));
         assert!(!remote_mutation_allows_local_commit(
             RemoteMutationOutcome::Queued

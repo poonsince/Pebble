@@ -275,6 +275,10 @@ fn can_advance_imap_folder_cursor(has_unresolved_failures: bool) -> bool {
     !has_unresolved_failures
 }
 
+fn should_run_imap_deletion_diff(_server_exists: u32, local_count: usize) -> bool {
+    local_count > 0
+}
+
 /// Configuration for the sync worker.
 #[derive(Debug, Clone)]
 pub struct SyncConfig {
@@ -865,15 +869,14 @@ impl SyncWorker {
         }
 
         // Step 6: Detect deletions (always — CONDSTORE doesn't cover expunges).
-        // Quick-check: if the server EXISTS count matches local count, no
-        // messages were expunged, so skip the expensive UID SEARCH ALL.
+        // EXISTS can stay unchanged when one message is expunged and another
+        // is added, so compare UID sets whenever local state exists.
         let server_exists = self
             .provider
             .inner()
             .select_exists(&folder.remote_id)
             .await?;
-        let local_count = local_state.len() as u32;
-        if server_exists < local_count {
+        if should_run_imap_deletion_diff(server_exists, local_state.len()) {
             let server_uids = self
                 .provider
                 .inner()
@@ -1139,5 +1142,15 @@ mod tests {
     #[test]
     fn imap_folder_cursor_advances_without_unresolved_failures() {
         assert!(can_advance_imap_folder_cursor(false));
+    }
+
+    #[test]
+    fn imap_deletion_diff_runs_when_server_and_local_counts_match() {
+        assert!(should_run_imap_deletion_diff(2, 2));
+    }
+
+    #[test]
+    fn imap_deletion_diff_skips_empty_local_state() {
+        assert!(!should_run_imap_deletion_diff(10, 0));
     }
 }

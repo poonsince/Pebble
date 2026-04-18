@@ -60,7 +60,10 @@ fn validate_save_path(save_to: &str) -> Result<(), PebbleError> {
             "Filename cannot end with a dot or space".to_string(),
         ));
     }
-    if filename_str.chars().any(|c| matches!(c, '<' | '>' | ':' | '"' | '|' | '?' | '*')) {
+    if filename_str
+        .chars()
+        .any(|c| matches!(c, '<' | '>' | ':' | '"' | '|' | '?' | '*'))
+    {
         return Err(PebbleError::Validation(
             "Filename contains characters unsupported on Windows".to_string(),
         ));
@@ -88,9 +91,8 @@ fn validate_save_path(save_to: &str) -> Result<(), PebbleError> {
     }
 
     // Ensure target is within user home directory to prevent writes to system paths
-    let home = home_dir().ok_or_else(|| {
-        PebbleError::Internal("Cannot determine user home directory".to_string())
-    })?;
+    let home = home_dir()
+        .ok_or_else(|| PebbleError::Internal("Cannot determine user home directory".to_string()))?;
     if !canonical.starts_with(&home) {
         return Err(PebbleError::Validation(
             "Save path must be within user home directory".to_string(),
@@ -104,12 +106,78 @@ fn validate_save_path(save_to: &str) -> Result<(), PebbleError> {
 fn home_dir() -> Option<std::path::PathBuf> {
     #[cfg(target_os = "windows")]
     {
-        std::env::var("USERPROFILE").ok().map(std::path::PathBuf::from)
+        std::env::var("USERPROFILE")
+            .ok()
+            .map(std::path::PathBuf::from)
     }
     #[cfg(not(target_os = "windows"))]
     {
         std::env::var("HOME").ok().map(std::path::PathBuf::from)
     }
+}
+
+fn copy_attachment_file_safely<F>(
+    source: &Path,
+    save_path: &Path,
+    mut on_progress: F,
+) -> Result<(), PebbleError>
+where
+    F: FnMut(u64, u64),
+{
+    use std::io::{Read, Write};
+
+    let mut src_file = std::fs::File::open(source)
+        .map_err(|e| PebbleError::Internal(format!("Failed to open source: {e}")))?;
+    let total_bytes = src_file
+        .metadata()
+        .map_err(|e| PebbleError::Internal(format!("Failed to read file metadata: {e}")))?
+        .len();
+
+    // create_new refuses to follow or replace an existing target, including a
+    // symlink planted after path validation and before the file is opened.
+    let mut dst_file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(save_path)
+        .map_err(|e| {
+            if e.kind() == std::io::ErrorKind::AlreadyExists {
+                PebbleError::Validation(
+                    "Target file already exists; choose a new filename".to_string(),
+                )
+            } else {
+                PebbleError::Internal(format!("Failed to create target file: {e}"))
+            }
+        })?;
+
+    let mut buf = [0u8; 8192];
+    let mut bytes_copied: u64 = 0;
+    let copy_result: std::result::Result<(), PebbleError> = (|| {
+        loop {
+            let n = src_file
+                .read(&mut buf)
+                .map_err(|e| PebbleError::Internal(format!("Read error: {e}")))?;
+            if n == 0 {
+                break;
+            }
+            dst_file
+                .write_all(&buf[..n])
+                .map_err(|e| PebbleError::Internal(format!("Write error: {e}")))?;
+            bytes_copied += n as u64;
+            on_progress(bytes_copied, total_bytes);
+        }
+        dst_file
+            .sync_all()
+            .map_err(|e| PebbleError::Internal(format!("Failed to flush file: {e}")))?;
+        Ok(())
+    })();
+
+    if let Err(e) = copy_result {
+        drop(dst_file);
+        let _ = std::fs::remove_file(save_path);
+        return Err(e);
+    }
+
+    Ok(())
 }
 
 #[tauri::command]
@@ -150,84 +218,46 @@ pub async fn download_attachment(
     let att_id = attachment_id.clone();
     // Use spawn_blocking to avoid blocking the async executor on large files
     tokio::task::spawn_blocking(move || {
-        use std::io::{Read, Write};
-
-        let mut src_file = std::fs::File::open(&source)
-            .map_err(|e| PebbleError::Internal(format!("Failed to open source: {e}")))?;
-        let total_bytes = src_file
-            .metadata()
-            .map_err(|e| PebbleError::Internal(format!("Failed to read file metadata: {e}")))?
-            .len();
-
-        // Write to a temporary file in the same directory, then rename atomically
+        let source_path = std::path::Path::new(&source);
         let save_path = std::path::Path::new(&save_to);
-        let parent = save_path.parent().ok_or_else(|| {
-            PebbleError::Internal("Invalid save directory".to_string())
-        })?;
-        let temp_name = format!(".pebble-download-{}.tmp", pebble_core::new_id());
-        let temp_path = parent.join(&temp_name);
-
-        let mut dst_file = std::fs::File::create(&temp_path)
-            .map_err(|e| PebbleError::Internal(format!("Failed to create temp file: {e}")))?;
-
-        let mut buf = [0u8; 8192];
-        let mut bytes_copied: u64 = 0;
-
-        let copy_result: std::result::Result<(), PebbleError> = (|| {
-            loop {
-                let n = src_file
-                    .read(&mut buf)
-                    .map_err(|e| PebbleError::Internal(format!("Read error: {e}")))?;
-                if n == 0 {
-                    break;
-                }
-                dst_file
-                    .write_all(&buf[..n])
-                    .map_err(|e| PebbleError::Internal(format!("Write error: {e}")))?;
-                bytes_copied += n as u64;
-
-                let _ = app.emit(
-                    "attachment:download-progress",
-                    serde_json::json!({
-                        "attachment_id": att_id,
-                        "bytes_copied": bytes_copied,
-                        "total_bytes": total_bytes,
-                    }),
-                );
-            }
-            Ok(())
-        })();
-
-        if let Err(e) = copy_result {
-            // Clean up temp file on failure
-            let _ = std::fs::remove_file(&temp_path);
-            return Err(e);
-        }
-
-        // Ensure all data is flushed to disk before rename
-        dst_file.sync_all()
-            .map_err(|e| PebbleError::Internal(format!("Failed to flush file: {e}")))?;
-        drop(dst_file);
-
-        // Re-validate that the final target is not a symlink before renaming
-        if save_path.exists() && save_path.symlink_metadata()
-            .map(|m| m.file_type().is_symlink())
-            .unwrap_or(false)
-        {
-            let _ = std::fs::remove_file(&temp_path);
-            return Err(PebbleError::Validation(
-                "Target path is a symlink — refusing to overwrite".to_string(),
-            ));
-        }
-
-        std::fs::rename(&temp_path, &save_to)
-            .map_err(|e| {
-                let _ = std::fs::remove_file(&temp_path);
-                PebbleError::Internal(format!("Failed to rename temp file to target: {e}"))
-            })?;
-
-        Ok::<(), PebbleError>(())
+        copy_attachment_file_safely(source_path, save_path, |bytes_copied, total_bytes| {
+            let _ = app.emit(
+                "attachment:download-progress",
+                serde_json::json!({
+                    "attachment_id": att_id,
+                    "bytes_copied": bytes_copied,
+                    "total_bytes": total_bytes,
+                }),
+            );
+        })
     })
     .await
     .map_err(|e| PebbleError::Internal(format!("Copy task failed: {e}")))?
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn copy_attachment_file_safely_rejects_existing_target() {
+        let unique = pebble_core::new_id();
+        let base = std::env::temp_dir().join(format!("pebble-attachment-copy-{unique}"));
+        std::fs::create_dir_all(&base).expect("test dir");
+        let source = base.join("source.txt");
+        let target = base.join("target.txt");
+        std::fs::write(&source, b"new content").expect("source write");
+        std::fs::write(&target, b"existing content").expect("target write");
+
+        let err = copy_attachment_file_safely(&source, &target, |_copied, _total| {})
+            .expect_err("existing targets must not be overwritten");
+
+        assert!(matches!(err, PebbleError::Validation(_)));
+        assert_eq!(
+            std::fs::read(&target).expect("target read"),
+            b"existing content"
+        );
+
+        let _ = std::fs::remove_dir_all(base);
+    }
 }

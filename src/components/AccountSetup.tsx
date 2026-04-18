@@ -467,7 +467,6 @@ export default function AccountSetup({ onClose }: Props) {
                 >
                   <option value="tls">{t("accountSetup.securityTls", "SSL/TLS")}</option>
                   <option value="starttls">{t("accountSetup.securityStarttls", "STARTTLS")}</option>
-                  <option value="plain">{t("accountSetup.securityPlain", "None")}</option>
                 </select>
               </div>
             </div>
@@ -509,7 +508,6 @@ export default function AccountSetup({ onClose }: Props) {
                 >
                   <option value="tls">{t("accountSetup.securityTls", "SSL/TLS")}</option>
                   <option value="starttls">{t("accountSetup.securityStarttls", "STARTTLS")}</option>
-                  <option value="plain">{t("accountSetup.securityPlain", "None")}</option>
                 </select>
               </div>
             </div>

@@ -278,8 +278,12 @@ function ComposeViewInner({ accounts }: { accounts: Account[] }) {
           {/* From */}
           {accounts.length > 1 && (
             <div style={composeStyles.fieldRow}>
-              <span style={composeStyles.fieldLabel}>{t("compose.from", "From")}</span>
+              <label htmlFor="compose-from-account" style={composeStyles.fieldLabel}>
+                {t("compose.from", "From")}
+              </label>
               <select
+                id="compose-from-account"
+                name="from"
                 value={fromAccountId}
                 onChange={(e) => setFromAccountId(e.target.value)}
                 style={{
@@ -299,8 +303,18 @@ function ComposeViewInner({ accounts }: { accounts: Account[] }) {
 
           {/* To */}
           <div style={composeStyles.fieldRow}>
-            <span style={composeStyles.fieldLabel}>{t("compose.to", "To")}</span>
-            <ContactAutocomplete value={to} onChange={setTo} accountId={fromAccountId} placeholder="recipient@example.com" />
+            <label id="compose-to-label" htmlFor="compose-to-input" style={composeStyles.fieldLabel}>
+              {t("compose.to", "To")}
+            </label>
+            <ContactAutocomplete
+              id="compose-to-input"
+              name="to"
+              ariaLabelledBy="compose-to-label"
+              value={to}
+              onChange={setTo}
+              accountId={fromAccountId}
+              placeholder="recipient@example.com"
+            />
             <div style={{ display: "flex", gap: "4px", padding: "0 8px", flexShrink: 0 }}>
               {!showCc && <button onClick={() => setShowCc(true)} style={composeStyles.toggleBtn}>{t("compose.cc", "Cc")}</button>}
               {!showBcc && <button onClick={() => setShowBcc(true)} style={composeStyles.toggleBtn}>{t("compose.bcc", "Bcc")}</button>}
@@ -309,24 +323,49 @@ function ComposeViewInner({ accounts }: { accounts: Account[] }) {
 
           {showCc && (
             <div style={composeStyles.fieldRow}>
-              <span style={composeStyles.fieldLabel}>{t("compose.cc", "Cc")}</span>
-              <ContactAutocomplete value={cc} onChange={setCc} accountId={fromAccountId} placeholder="cc@example.com" />
+              <label id="compose-cc-label" htmlFor="compose-cc-input" style={composeStyles.fieldLabel}>
+                {t("compose.cc", "Cc")}
+              </label>
+              <ContactAutocomplete
+                id="compose-cc-input"
+                name="cc"
+                ariaLabelledBy="compose-cc-label"
+                value={cc}
+                onChange={setCc}
+                accountId={fromAccountId}
+                placeholder="cc@example.com"
+              />
             </div>
           )}
 
           {showBcc && (
             <div style={composeStyles.fieldRow}>
-              <span style={composeStyles.fieldLabel}>{t("compose.bcc", "Bcc")}</span>
-              <ContactAutocomplete value={bcc} onChange={setBcc} accountId={fromAccountId} placeholder="bcc@example.com" />
+              <label id="compose-bcc-label" htmlFor="compose-bcc-input" style={composeStyles.fieldLabel}>
+                {t("compose.bcc", "Bcc")}
+              </label>
+              <ContactAutocomplete
+                id="compose-bcc-input"
+                name="bcc"
+                ariaLabelledBy="compose-bcc-label"
+                value={bcc}
+                onChange={setBcc}
+                accountId={fromAccountId}
+                placeholder="bcc@example.com"
+              />
             </div>
           )}
 
           {/* Subject */}
           <div style={composeStyles.fieldRow}>
-            <span style={composeStyles.fieldLabel}>{t("compose.subject", "Subject")}</span>
+            <label htmlFor="compose-subject" style={composeStyles.fieldLabel}>
+              {t("compose.subject", "Subject")}
+            </label>
               <input
+                id="compose-subject"
+                name="subject"
                 type="text" value={subject} onChange={(e) => setSubject(e.target.value)}
                 placeholder={t("compose.subject", "Subject")}
+                autoComplete="off"
                 style={{ flex: 1, padding: "8px 0", border: "none", backgroundColor: "transparent", fontSize: "13px", color: "var(--color-text-primary)" }}
               />
           </div>

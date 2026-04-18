@@ -18,6 +18,7 @@ use serde_json::json;
 pub(super) enum RemoteMutationOutcome {
     Applied,
     Queued,
+    QueuedLocalCommit,
     LocalOnly,
     #[allow(dead_code)]
     Failed,
@@ -26,7 +27,9 @@ pub(super) enum RemoteMutationOutcome {
 pub(super) fn remote_mutation_allows_local_commit(outcome: RemoteMutationOutcome) -> bool {
     matches!(
         outcome,
-        RemoteMutationOutcome::Applied | RemoteMutationOutcome::LocalOnly
+        RemoteMutationOutcome::Applied
+            | RemoteMutationOutcome::QueuedLocalCommit
+            | RemoteMutationOutcome::LocalOnly
     )
 }
 
@@ -51,6 +54,18 @@ pub(super) fn queue_pending_remote_op(
     )?;
     state.store.mark_pending_mail_op_failed(&op_id, error)?;
     Ok(RemoteMutationOutcome::Queued)
+}
+
+pub(super) fn queue_pending_remote_op_for_local_commit(
+    state: &AppState,
+    message: &Message,
+    op_type: &str,
+    payload: serde_json::Value,
+    error: &str,
+) -> std::result::Result<RemoteMutationOutcome, PebbleError> {
+    let outcome = queue_pending_remote_op(state, message, op_type, payload, error)?;
+    debug_assert_eq!(outcome, RemoteMutationOutcome::Queued);
+    Ok(RemoteMutationOutcome::QueuedLocalCommit)
 }
 
 pub(super) fn queued_remote_error(op_type: &str, error: &str) -> PebbleError {
