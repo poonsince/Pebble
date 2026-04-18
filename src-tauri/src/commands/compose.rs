@@ -9,7 +9,10 @@ use pebble_mail::smtp::SmtpSender;
 use tauri::State;
 
 /// Validate that all attachment paths are within allowed directories.
-fn validate_attachment_paths(paths: &[String], attachments_dir: &std::path::Path) -> std::result::Result<Vec<String>, PebbleError> {
+pub(crate) fn validate_attachment_paths(
+    paths: &[String],
+    attachments_dir: &std::path::Path,
+) -> std::result::Result<Vec<String>, PebbleError> {
     let mut allowed_dirs: Vec<PathBuf> = vec![attachments_dir.to_path_buf()];
 
     // Add user home subdirectories (Documents, Downloads, Desktop) and temp dir

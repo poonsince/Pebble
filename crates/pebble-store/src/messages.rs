@@ -1,4 +1,4 @@
-use pebble_core::{Message, MessageSummary, PebbleError, Result};
+use pebble_core::{Attachment, Message, MessageSummary, PebbleError, Result};
 use rusqlite::{params, OptionalExtension, Row};
 use std::collections::HashMap;
 
@@ -163,6 +163,86 @@ impl Store {
                 tx.execute(
                     "INSERT INTO message_folders (message_id, folder_id) VALUES (?1, ?2)",
                     params![msg.id, folder_id],
+                )?;
+            }
+
+            tx.commit()?;
+            Ok(())
+        })
+    }
+
+    pub fn replace_message_with_attachments(
+        &self,
+        msg: &Message,
+        folder_ids: &[String],
+        attachments: &[Attachment],
+    ) -> Result<()> {
+        self.with_write(|conn| {
+            let to_json = serde_json::to_string(&msg.to_list).map_err(|e| PebbleError::Storage(e.to_string()))?;
+            let cc_json = serde_json::to_string(&msg.cc_list).map_err(|e| PebbleError::Storage(e.to_string()))?;
+            let bcc_json = serde_json::to_string(&msg.bcc_list).map_err(|e| PebbleError::Storage(e.to_string()))?;
+
+            let tx = conn.unchecked_transaction()?;
+
+            tx.execute("DELETE FROM messages WHERE id = ?1", params![msg.id])?;
+            tx.execute(
+                "INSERT INTO messages (id, account_id, remote_id, message_id_header, in_reply_to,
+                 references_header, thread_id, subject, snippet, from_address, from_name,
+                 to_list, cc_list, bcc_list, body_text, body_html_raw,
+                 has_attachments, is_read, is_starred, is_draft,
+                 date, remote_version, is_deleted, deleted_at, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11,?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20,?21, ?22, ?23, ?24, ?25, ?26)",
+                params![
+                    msg.id,
+                    msg.account_id,
+                    msg.remote_id,
+                    msg.message_id_header,
+                    msg.in_reply_to,
+                    msg.references_header,
+                    msg.thread_id,
+                    msg.subject,
+                    msg.snippet,
+                    msg.from_address,
+                    msg.from_name,
+                    to_json,
+                    cc_json,
+                    bcc_json,
+                    msg.body_text,
+                    msg.body_html_raw,
+                    msg.has_attachments as i32,
+                    msg.is_read as i32,
+                    msg.is_starred as i32,
+                    msg.is_draft as i32,
+                    msg.date,
+                    msg.remote_version,
+                    msg.is_deleted as i32,
+                    msg.deleted_at,
+                    msg.created_at,
+                    msg.updated_at,
+                ],
+            )?;
+
+            for folder_id in folder_ids {
+                tx.execute(
+                    "INSERT INTO message_folders (message_id, folder_id) VALUES (?1, ?2)",
+                    params![msg.id, folder_id],
+                )?;
+            }
+
+            for attachment in attachments {
+                tx.execute(
+                    "INSERT INTO attachments (id, message_id, filename, mime_type, size, local_path, content_id, is_inline)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                    params![
+                        attachment.id,
+                        attachment.message_id,
+                        attachment.filename,
+                        attachment.mime_type,
+                        attachment.size,
+                        attachment.local_path,
+                        attachment.content_id,
+                        attachment.is_inline as i32,
+                    ],
                 )?;
             }
 
@@ -1196,6 +1276,58 @@ mod remote_id_scope_tests {
 
         assert!(inbox_matches.contains("123"));
         assert!(!sent_matches.contains("123"));
+    }
+
+    #[test]
+    fn replace_message_with_attachments_replaces_old_attachment_set() {
+        let store = Store::open_in_memory().unwrap();
+        let account = make_account();
+        store.insert_account(&account).unwrap();
+
+        let drafts = make_folder(&account.id, "Drafts", FolderRole::Drafts, 0);
+        store.insert_folder(&drafts).unwrap();
+
+        let mut msg = make_message(&account.id, "draft-1");
+        msg.is_draft = true;
+        msg.has_attachments = true;
+
+        let old_attachment = Attachment {
+            id: new_id(),
+            message_id: msg.id.clone(),
+            filename: "old.pdf".to_string(),
+            mime_type: "application/pdf".to_string(),
+            size: 10,
+            local_path: Some("C:\\tmp\\old.pdf".to_string()),
+            content_id: None,
+            is_inline: false,
+        };
+        store
+            .replace_message_with_attachments(&msg, &[drafts.id.clone()], &[old_attachment])
+            .unwrap();
+
+        let mut updated = msg.clone();
+        updated.subject = "Updated draft".to_string();
+        let new_attachment = Attachment {
+            id: new_id(),
+            message_id: updated.id.clone(),
+            filename: "new.pdf".to_string(),
+            mime_type: "application/pdf".to_string(),
+            size: 20,
+            local_path: Some("C:\\tmp\\new.pdf".to_string()),
+            content_id: None,
+            is_inline: false,
+        };
+        store
+            .replace_message_with_attachments(&updated, &[drafts.id.clone()], &[new_attachment])
+            .unwrap();
+
+        let fetched = store.get_message(&updated.id).unwrap().unwrap();
+        assert_eq!(fetched.subject, "Updated draft");
+        assert!(fetched.has_attachments);
+
+        let attachments = store.list_attachments_by_message(&updated.id).unwrap();
+        assert_eq!(attachments.len(), 1);
+        assert_eq!(attachments[0].filename, "new.pdf");
     }
 }
 

@@ -293,21 +293,31 @@ pub struct ImapProvider {
 }
 
 /// Build a rustls TLS connector with bundled root certificates.
-fn build_tls_connector() -> tokio_rustls::TlsConnector {
+fn build_tls_connector() -> Result<tokio_rustls::TlsConnector> {
     let provider = Arc::new(rustls::crypto::aws_lc_rs::default_provider());
     let mut root_store = rustls::RootCertStore::empty();
     root_store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
     let config = rustls::ClientConfig::builder_with_provider(provider)
         .with_safe_default_protocol_versions()
-        .expect("TLS protocol versions")
+        .map_err(|e| PebbleError::Network(format!("TLS protocol versions: {e}")))?
         .with_root_certificates(root_store)
         .with_no_client_auth();
-    tokio_rustls::TlsConnector::from(Arc::new(config))
+    Ok(tokio_rustls::TlsConnector::from(Arc::new(config)))
+}
+
+#[cfg(test)]
+mod tls_config_tests {
+    use super::build_tls_connector;
+
+    #[test]
+    fn build_tls_connector_returns_result() {
+        assert!(build_tls_connector().is_ok());
+    }
 }
 
 /// Perform a TLS handshake using rustls on the given TCP stream.
 async fn tls_connect(host: &str, tcp: TcpStream) -> Result<TlsStream<TcpStream>> {
-    let connector = build_tls_connector();
+    let connector = build_tls_connector()?;
     let server_name = rustls::pki_types::ServerName::try_from(host)
         .map_err(|e| PebbleError::Network(format!("Invalid server name '{}': {}", host, e)))?
         .to_owned();

@@ -455,6 +455,7 @@ export async function saveDraft(args: {
   bodyHtml?: string;
   inReplyTo?: string;
   existingDraftId?: string;
+  attachmentPaths?: string[];
 }): Promise<string> {
   return invoke("save_draft", {
     accountId: args.accountId,
@@ -466,6 +467,7 @@ export async function saveDraft(args: {
     bodyHtml: args.bodyHtml ?? null,
     inReplyTo: args.inReplyTo ?? null,
     existingDraftId: args.existingDraftId ?? null,
+    attachmentPaths: args.attachmentPaths ?? null,
   });
 }
 

@@ -1027,17 +1027,17 @@ fn guess_mime_type(filename: &str) -> &'static str {
 }
 
 fn build_draft_raw(draft: &DraftMessage) -> Vec<u8> {
-    let mut raw = String::new();
-    write_common_headers(
-        &mut raw,
-        &draft.to,
-        &draft.cc,
-        &draft.bcc,
-        &draft.subject,
-        draft.in_reply_to.as_deref(),
-    );
-    append_body(&mut raw, &draft.body_text, draft.body_html.as_deref());
-    raw.into_bytes()
+    let message = OutgoingMessage {
+        to: draft.to.clone(),
+        cc: draft.cc.clone(),
+        bcc: draft.bcc.clone(),
+        subject: draft.subject.clone(),
+        body_text: draft.body_text.clone(),
+        body_html: draft.body_html.clone(),
+        in_reply_to: draft.in_reply_to.clone(),
+        attachment_paths: draft.attachment_paths.clone(),
+    };
+    build_raw_message(&message)
 }
 
 /// Base64url decoding without padding (RFC 4648 section 5).
@@ -1451,6 +1451,34 @@ mod tests {
         assert!(raw.contains("multipart/alternative"));
         assert!(raw.contains("Content-Type: text/html; charset=utf-8"));
         assert!(raw.contains("<p><strong>HTML</strong> body</p>"));
+    }
+
+    #[test]
+    fn test_build_draft_raw_with_attachment() {
+        let path = std::env::temp_dir().join(format!("pebble-draft-{}.txt", new_id()));
+        std::fs::write(&path, b"hello").unwrap();
+        let path_string = path.to_string_lossy().into_owned();
+        let draft = DraftMessage {
+            id: None,
+            to: vec![EmailAddress {
+                name: None,
+                address: "alice@example.com".to_string(),
+            }],
+            cc: vec![],
+            bcc: vec![],
+            subject: "Draft with attachment".to_string(),
+            body_text: "See attached".to_string(),
+            body_html: None,
+            in_reply_to: None,
+            attachment_paths: vec![path_string],
+        };
+
+        let raw = String::from_utf8(build_draft_raw(&draft)).unwrap();
+        let _ = std::fs::remove_file(path);
+
+        assert!(raw.contains("multipart/mixed"));
+        assert!(raw.contains("filename=\""));
+        assert!(raw.contains("aGVsbG8="));
     }
 
     #[test]

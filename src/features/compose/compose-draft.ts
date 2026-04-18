@@ -1,3 +1,9 @@
+export interface ComposeAttachment {
+  name: string;
+  path: string;
+  size: number;
+}
+
 export interface ComposeDraftInput {
   to: string[];
   cc: string[];
@@ -5,6 +11,7 @@ export interface ComposeDraftInput {
   subject: string;
   rawSource: string;
   richTextHtml: string;
+  attachments?: ComposeAttachment[];
 }
 
 function hasNonEmptyAddress(addresses: string[]): boolean {
@@ -21,6 +28,12 @@ function hasVisibleText(html: string): boolean {
     .trim().length > 0;
 }
 
+function hasAttachment(attachments: ComposeAttachment[] = []): boolean {
+  return attachments.some((attachment) =>
+    attachment.path.trim().length > 0 || attachment.name.trim().length > 0,
+  );
+}
+
 export function hasComposeDraft(input: ComposeDraftInput): boolean {
   return (
     hasNonEmptyAddress(input.to) ||
@@ -28,6 +41,7 @@ export function hasComposeDraft(input: ComposeDraftInput): boolean {
     hasNonEmptyAddress(input.bcc) ||
     input.subject.trim().length > 0 ||
     input.rawSource.trim().length > 0 ||
-    hasVisibleText(input.richTextHtml)
+    hasVisibleText(input.richTextHtml) ||
+    hasAttachment(input.attachments)
   );
 }

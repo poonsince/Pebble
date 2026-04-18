@@ -1,10 +1,13 @@
 use crate::state::AppState;
 use pebble_core::{
-    traits::DraftProvider, DraftMessage, EmailAddress, FolderRole, PebbleError, ProviderType,
+    traits::DraftProvider, Attachment, DraftMessage, EmailAddress, FolderRole, PebbleError,
+    ProviderType,
 };
+use std::path::Path;
 use tauri::State;
 use tracing::warn;
 
+use super::compose::validate_attachment_paths;
 use super::messages::provider_dispatch::ConnectedProvider;
 
 fn requires_remote_draft_delete(provider_type: Option<ProviderType>) -> bool {
@@ -38,8 +41,15 @@ pub async fn save_draft(
     body_text: String,
     body_html: Option<String>,
     in_reply_to: Option<String>,
+    attachment_paths: Option<Vec<String>>,
     existing_draft_id: Option<String>,
 ) -> std::result::Result<String, PebbleError> {
+    let raw_attachment_paths = attachment_paths.unwrap_or_default();
+    let attachment_paths = if raw_attachment_paths.is_empty() {
+        raw_attachment_paths
+    } else {
+        validate_attachment_paths(&raw_attachment_paths, &state.attachments_dir)?
+    };
     let draft = DraftMessage {
         id: existing_draft_id.clone(),
         to: to.into_iter().map(|a| EmailAddress { name: None, address: a }).collect(),
@@ -49,6 +59,7 @@ pub async fn save_draft(
         body_text,
         body_html,
         in_reply_to,
+        attachment_paths,
     };
 
     let provider_type = state.store.get_account(&account_id)?
@@ -87,11 +98,7 @@ fn save_draft_locally(
     draft: &DraftMessage,
 ) -> std::result::Result<String, PebbleError> {
     let id = draft.id.clone().unwrap_or_else(pebble_core::new_id);
-
-    // Delete any existing draft with this ID to implement upsert semantics
-    if draft.id.is_some() {
-        let _ = state.store.hard_delete_messages(&[id.clone()]);
-    }
+    let attachment_records = draft_attachment_records(&id, &draft.attachment_paths);
 
     let msg = pebble_core::Message {
         id: id.clone(),
@@ -110,7 +117,7 @@ fn save_draft_locally(
         bcc_list: draft.bcc.clone(),
         body_text: draft.body_text.clone(),
         body_html_raw: draft.body_html.clone().unwrap_or_default(),
-        has_attachments: false,
+        has_attachments: !attachment_records.is_empty(),
         is_read: true,
         is_starred: false,
         is_draft: true,
@@ -129,8 +136,32 @@ fn save_draft_locally(
         Ok(Some(f)) => vec![f.id],
         _ => Vec::new(),
     };
-    state.store.insert_message(&msg, &folder_ids)?;
+    state.store.replace_message_with_attachments(&msg, &folder_ids, &attachment_records)?;
     Ok(id)
+}
+
+fn draft_attachment_records(draft_id: &str, attachment_paths: &[String]) -> Vec<Attachment> {
+    attachment_paths
+        .iter()
+        .map(|path| {
+            let filename = Path::new(path)
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or("attachment")
+                .to_string();
+            let size = std::fs::metadata(path).map(|metadata| metadata.len() as i64).unwrap_or(0);
+            Attachment {
+                id: pebble_core::new_id(),
+                message_id: draft_id.to_string(),
+                filename,
+                mime_type: "application/octet-stream".to_string(),
+                size,
+                local_path: Some(path.clone()),
+                content_id: None,
+                is_inline: false,
+            }
+        })
+        .collect()
 }
 
 #[tauri::command]

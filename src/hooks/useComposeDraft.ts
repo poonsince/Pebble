@@ -1,12 +1,13 @@
 import { useEffect, useRef, useCallback } from "react";
 import { useComposeStore } from "@/stores/compose.store";
 import { saveDraft } from "@/lib/api";
+import { hasComposeDraft, type ComposeAttachment } from "@/features/compose/compose-draft";
 
 import type { EditorMode } from "./useComposeEditor";
 
 const DRAFT_STORAGE_KEY = "pebble-compose-draft";
 
-interface DraftData {
+export interface DraftData {
   accountId: string;
   to: string[];
   cc: string[];
@@ -15,6 +16,7 @@ interface DraftData {
   rawSource: string;
   richTextHtml: string;
   editorMode: EditorMode;
+  attachments: ComposeAttachment[];
   savedAt: number;
 }
 
@@ -50,7 +52,10 @@ export function loadDraftFromStorage(validAccountIds?: string[]): DraftData | nu
     if (validAccountIds && !validAccountIds.includes(draft.accountId)) {
       return null;
     }
-    return draft as DraftData;
+    return {
+      ...draft,
+      attachments: Array.isArray(draft.attachments) ? draft.attachments : [],
+    } as DraftData;
   } catch { return null; }
 }
 
@@ -68,6 +73,7 @@ interface UseComposeDraftArgs {
   editorMode: EditorMode;
   composeMode: string | null;
   fromAccountId: string | null;
+  attachments: ComposeAttachment[];
   /** True once the TipTap editor has mounted and populated richTextHtml with
    * its initial content (signature, quoted reply, etc.). Until this flips to
    * true, the snapshot would compare user edits against an empty string and
@@ -76,7 +82,7 @@ interface UseComposeDraftArgs {
 }
 
 export function useComposeDraft({
-  to, cc, bcc, subject, rawSource, richTextHtml, editorMode, composeMode, fromAccountId, editorReady,
+  to, cc, bcc, subject, rawSource, richTextHtml, editorMode, composeMode, fromAccountId, attachments, editorReady,
 }: UseComposeDraftArgs) {
   // Snapshot the initial compose state so pre-populated reply/forward
   // fields don't immediately trigger the "unsaved draft" guard.
@@ -84,13 +90,13 @@ export function useComposeDraft({
   // in an effect that runs after the first render post-editorReady.
   const initialSnapshot = useRef<{
     to: string[]; cc: string[]; bcc: string[]; subject: string;
-    rawSource: string; richTextHtml: string;
+    rawSource: string; richTextHtml: string; attachments: ComposeAttachment[];
   } | null>(null);
   useEffect(() => {
     if (!editorReady || initialSnapshot.current) return;
     initialSnapshot.current = {
       to: [...to], cc: [...cc], bcc: [...bcc], subject,
-      rawSource, richTextHtml,
+      rawSource, richTextHtml, attachments: attachments.map((a) => ({ ...a })),
     };
     // Only depend on editorReady — we want this to run once after mount, not
     // each time the user edits.
@@ -101,15 +107,23 @@ export function useComposeDraft({
     (a: string[], b: string[]) => a.length === b.length && a.every((v, i) => v === b[i]),
     [],
   );
+  const attachmentsEqual = useCallback(
+    (a: ComposeAttachment[], b: ComposeAttachment[]) =>
+      a.length === b.length &&
+      a.every((v, i) => v.name === b[i]?.name && v.path === b[i]?.path && v.size === b[i]?.size),
+    [],
+  );
 
   // Ref to track the server-side draft ID across saves.
   // Scoped per account: when the user switches From, the prior draft_id
   // belongs to a different account and must not be reused.
   const draftIdRef = useRef<string | null>(null);
   const draftAccountRef = useRef<string | null>(null);
+  const draftIdsByAccountRef = useRef<Record<string, string>>({});
+  const saveGenerationByAccountRef = useRef<Record<string, number>>({});
   if (draftAccountRef.current !== fromAccountId) {
     draftAccountRef.current = fromAccountId;
-    draftIdRef.current = null;
+    draftIdRef.current = fromAccountId ? draftIdsByAccountRef.current[fromAccountId] ?? null : null;
   }
 
   // Track dirty state for leave-protection.
@@ -123,17 +137,36 @@ export function useComposeDraft({
       !arraysEqual(bcc, init.bcc) ||
       subject !== init.subject ||
       rawSource !== init.rawSource ||
-      richTextHtml !== init.richTextHtml;
+      richTextHtml !== init.richTextHtml ||
+      !attachmentsEqual(attachments, init.attachments);
     useComposeStore.getState().setComposeDirty(userChanged);
-  }, [arraysEqual, bcc, cc, rawSource, richTextHtml, subject, to, editorReady]);
+  }, [arraysEqual, attachments, attachmentsEqual, bcc, cc, rawSource, richTextHtml, subject, to, editorReady]);
 
   // Auto-save draft to localStorage and backend (debounced 3s)
   useEffect(() => {
-    if (!composeMode) return;
+    if (!composeMode || !editorReady) return;
     const timer = setTimeout(() => {
-      const hasDraft = to.length > 0 || cc.length > 0 || bcc.length > 0 || subject.trim() || rawSource.trim() || richTextHtml.trim();
+      const draftAttachments = attachments.filter((attachment) =>
+        attachment.path.trim().length > 0 || attachment.name.trim().length > 0,
+      );
+      const hasDraft = hasComposeDraft({
+        to, cc, bcc, subject, rawSource, richTextHtml, attachments: draftAttachments,
+      });
       if (hasDraft && fromAccountId) {
-        saveDraftToStorage({ accountId: fromAccountId, to, cc, bcc, subject, rawSource, richTextHtml, editorMode });
+        const accountIdAtSave = fromAccountId;
+        const generation = (saveGenerationByAccountRef.current[accountIdAtSave] ?? 0) + 1;
+        saveGenerationByAccountRef.current[accountIdAtSave] = generation;
+        saveDraftToStorage({
+          accountId: accountIdAtSave,
+          to,
+          cc,
+          bcc,
+          subject,
+          rawSource,
+          richTextHtml,
+          editorMode,
+          attachments: draftAttachments,
+        });
         // Also save to backend under the current From account
         {
           // Pick body source based on current editor mode to avoid stale content.
@@ -143,13 +176,19 @@ export function useComposeDraft({
             : rawSource;
           const bodyHtml = editorMode === "rich" ? richTextHtml : (editorMode === "html" ? rawSource : undefined);
           saveDraft({
-            accountId: fromAccountId,
+            accountId: accountIdAtSave,
             to, cc, bcc, subject,
             bodyText,
             bodyHtml: bodyHtml || undefined,
-            existingDraftId: draftIdRef.current || undefined,
+            attachmentPaths: draftAttachments.map((attachment) => attachment.path).filter(Boolean),
+            existingDraftId: draftIdsByAccountRef.current[accountIdAtSave] || undefined,
           }).then((id) => {
-            draftIdRef.current = id;
+            if (saveGenerationByAccountRef.current[accountIdAtSave] === generation) {
+              draftIdsByAccountRef.current[accountIdAtSave] = id;
+              if (draftAccountRef.current === accountIdAtSave) {
+                draftIdRef.current = id;
+              }
+            }
           }).catch((err) => {
             console.warn("Backend draft save failed:", err);
           });
@@ -157,7 +196,7 @@ export function useComposeDraft({
       }
     }, 3000);
     return () => clearTimeout(timer);
-  }, [to, cc, bcc, subject, rawSource, richTextHtml, editorMode, composeMode, fromAccountId]);
+  }, [attachments, to, cc, bcc, subject, rawSource, richTextHtml, editorMode, composeMode, fromAccountId, editorReady]);
 
-  return { draftIdRef };
+  return { draftIdRef, draftIdsByAccountRef };
 }

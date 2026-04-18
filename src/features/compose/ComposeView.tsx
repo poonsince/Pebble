@@ -18,6 +18,8 @@ import { useComposeDraft, loadDraftFromStorage, clearDraftStorage } from "@/hook
 import { deleteDraft } from "@/lib/api";
 import { useComposeEditor } from "@/hooks/useComposeEditor";
 import { useConfirmStore } from "@/stores/confirm.store";
+import { useToastStore } from "@/stores/toast.store";
+import type { ComposeAttachment } from "./compose-draft";
 import { ModeButton, EditorToolbar, MarkdownToolbar, composeStyles } from "./ComposeToolbar";
 
 export default function ComposeView() {
@@ -71,19 +73,23 @@ export default function ComposeView() {
   // flips dirty when signature/quoted-reply text populates.
   // For "new" composes with no signature the editor stays empty but is still
   // "ready" once mounted, so we gate on editor presence plus one effect tick.
+  // Attachments are part of the draft snapshot and must be declared before
+  // the draft persistence hook.
+  const attachInputRef = useRef<HTMLInputElement>(null);
+  const [attachments, setAttachments] = useState<ComposeAttachment[]>(() =>
+    restoredDraft.current?.attachments ?? [],
+  );
+  const [isDragging, setIsDragging] = useState(false);
+
   const [editorReady, setEditorReady] = useState(false);
   useEffect(() => {
     if (editor && !editorReady) setEditorReady(true);
   }, [editor, editorReady]);
-  const { draftIdRef } = useComposeDraft({
+  const { draftIdRef, draftIdsByAccountRef } = useComposeDraft({
     to, cc, bcc, subject, rawSource, richTextHtml, editorMode, composeMode, fromAccountId,
+    attachments,
     editorReady,
   });
-
-  // ─── Attachments ─────────────────────────────────────────────────────────────
-  const attachInputRef = useRef<HTMLInputElement>(null);
-  const [attachments, setAttachments] = useState<{ name: string; path: string; size: number }[]>([]);
-  const [isDragging, setIsDragging] = useState(false);
 
   // ─── Templates ───────────────────────────────────────────────────────────────
   const [showTemplates, setShowTemplates] = useState(false);
@@ -149,12 +155,24 @@ export default function ComposeView() {
       },
       {
         onSuccess: () => {
-          // Delete backend draft if one was saved
+          const draftIdsToDelete = { ...draftIdsByAccountRef.current };
           if (draftIdRef.current && fromAccountId) {
-            deleteDraft(fromAccountId, draftIdRef.current).catch((err) => {
+            draftIdsToDelete[fromAccountId] = draftIdRef.current;
+          }
+          for (const [draftAccountId, draftId] of Object.entries(draftIdsToDelete)) {
+            deleteDraft(draftAccountId, draftId).catch((err) => {
               console.warn("Failed to delete draft after send:", err);
+              useToastStore.getState().addToast({
+                type: "error",
+                message: t(
+                  "compose.draftCleanupFailed",
+                  "Sent, but failed to remove the saved draft. You can delete it from Drafts.",
+                ),
+              });
             });
           }
+          draftIdsByAccountRef.current = {};
+          draftIdRef.current = null;
           clearDraftStorage();
           useComposeStore.getState().setComposeDirty(false);
           closeCompose();

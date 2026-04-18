@@ -444,22 +444,7 @@ impl MailTransport for OutlookProvider {
         // Build attachment list
         let mut attachments = Vec::new();
         for path_str in &message.attachment_paths {
-            let path = std::path::Path::new(path_str);
-            let filename = path
-                .file_name()
-                .and_then(|n| n.to_str())
-                .unwrap_or("attachment")
-                .to_string();
-            let data = std::fs::read(path).map_err(|e| {
-                PebbleError::Internal(format!("Failed to read attachment {path_str}: {e}"))
-            })?;
-            let mime = guess_outlook_mime(&filename);
-            attachments.push(GraphFileAttachment {
-                odata_type: "#microsoft.graph.fileAttachment".to_string(),
-                name: filename,
-                content_type: mime.to_string(),
-                content_bytes: base64_standard_encode_outlook(&data),
-            });
+            attachments.push(graph_file_attachment_from_path(path_str)?);
         }
 
         let body = GraphSendMail {
@@ -652,10 +637,7 @@ impl OutlookProvider {
     /// Fetch all file attachments for a message via Graph API.
     /// Returns parsed `AttachmentData` suitable for `persist_message_attachments`.
     /// Inline and non-file attachments (itemAttachment, referenceAttachment) are skipped.
-    pub async fn list_message_attachments(
-        &self,
-        remote_id: &str,
-    ) -> Result<Vec<crate::parser::AttachmentData>> {
+    async fn list_graph_attachment_items(&self, remote_id: &str) -> Result<Vec<GraphAttachmentItem>> {
         let url = format!("{GRAPH_API_BASE}/messages/{remote_id}/attachments");
         let resp = self.get(&url).await?;
         if !resp.status().is_success() {
@@ -669,16 +651,56 @@ impl OutlookProvider {
             .json()
             .await
             .map_err(|e| PebbleError::Network(format!("Failed to parse attachment list: {e}")))?;
+        Ok(list.value)
+    }
 
+    async fn replace_draft_attachments(
+        &self,
+        draft_id: &str,
+        attachment_paths: &[String],
+        remove_existing: bool,
+    ) -> Result<()> {
+        if remove_existing {
+            for item in self.list_graph_attachment_items(draft_id).await? {
+                if !is_graph_file_attachment(&item) {
+                    continue;
+                }
+                let url = format!("{GRAPH_API_BASE}/messages/{draft_id}/attachments/{}", item.id);
+                let resp = self.delete(&url).await?;
+                if !resp.status().is_success() {
+                    let status = resp.status();
+                    let text = resp.text().await.unwrap_or_default();
+                    return Err(PebbleError::Network(format!(
+                        "Failed to delete draft attachment (status {status}): {text}"
+                    )));
+                }
+            }
+        }
+
+        for path in attachment_paths {
+            let attachment = graph_file_attachment_from_path(path)?;
+            let url = format!("{GRAPH_API_BASE}/messages/{draft_id}/attachments");
+            let resp = self.post_json(&url, &attachment).await?;
+            if !resp.status().is_success() {
+                let status = resp.status();
+                let text = resp.text().await.unwrap_or_default();
+                return Err(PebbleError::Network(format!(
+                    "Failed to add draft attachment (status {status}): {text}"
+                )));
+            }
+        }
+
+        Ok(())
+    }
+
+    pub async fn list_message_attachments(
+        &self,
+        remote_id: &str,
+    ) -> Result<Vec<crate::parser::AttachmentData>> {
         let mut out = Vec::new();
-        for item in list.value {
+        for item in self.list_graph_attachment_items(remote_id).await? {
             // Only fileAttachment carries inline content bytes; skip others for now.
-            let is_file = item
-                .odata_type
-                .as_deref()
-                .map(|t| t.eq_ignore_ascii_case("#microsoft.graph.fileAttachment"))
-                .unwrap_or(false);
-            if !is_file {
+            if !is_graph_file_attachment(&item) {
                 continue;
             }
             let Some(b64) = item.content_bytes else {
@@ -780,6 +802,10 @@ impl DraftProvider for OutlookProvider {
             .json()
             .await
             .map_err(|e| PebbleError::Network(format!("Failed to parse draft response: {e}")))?;
+        if !draft.attachment_paths.is_empty() {
+            self.replace_draft_attachments(&draft_resp.id, &draft.attachment_paths, false)
+                .await?;
+        }
         Ok(draft_resp.id)
     }
 
@@ -811,6 +837,8 @@ impl DraftProvider for OutlookProvider {
                 "Failed to update draft (status {status}): {text}"
             )));
         }
+        self.replace_draft_attachments(draft_id, &draft.attachment_paths, true)
+            .await?;
         Ok(())
     }
 
@@ -888,6 +916,31 @@ fn email_to_graph_recipient(addr: &EmailAddress) -> GraphOutgoingRecipient {
             address: addr.address.clone(),
         },
     }
+}
+
+fn is_graph_file_attachment(item: &GraphAttachmentItem) -> bool {
+    item.odata_type
+        .as_deref()
+        .map(|t| t.eq_ignore_ascii_case("#microsoft.graph.fileAttachment"))
+        .unwrap_or(false)
+}
+
+fn graph_file_attachment_from_path(path_str: &str) -> Result<GraphFileAttachment> {
+    let path = std::path::Path::new(path_str);
+    let filename = path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("attachment")
+        .to_string();
+    let data = std::fs::read(path)
+        .map_err(|e| PebbleError::Internal(format!("Failed to read attachment {path_str}: {e}")))?;
+    let mime = guess_outlook_mime(&filename);
+    Ok(GraphFileAttachment {
+        odata_type: "#microsoft.graph.fileAttachment".to_string(),
+        name: filename,
+        content_type: mime.to_string(),
+        content_bytes: base64_standard_encode_outlook(&data),
+    })
 }
 
 fn base64_standard_encode_outlook(data: &[u8]) -> String {
@@ -1046,6 +1099,7 @@ fn graph_message_to_draft(gm: &GraphMessage) -> DraftMessage {
         body_text,
         body_html,
         in_reply_to: None,
+        attachment_paths: Vec::new(),
     }
 }
 
@@ -1191,6 +1245,21 @@ mod tests {
         let r = email_to_graph_recipient(&addr);
         assert_eq!(r.email_address.name, Some("Charlie".to_string()));
         assert_eq!(r.email_address.address, "charlie@example.com");
+    }
+
+    #[test]
+    fn test_graph_file_attachment_from_path() {
+        let path = std::env::temp_dir().join(format!("pebble-outlook-{}.txt", new_id()));
+        std::fs::write(&path, b"hello").unwrap();
+        let path_string = path.to_string_lossy().into_owned();
+
+        let attachment = graph_file_attachment_from_path(&path_string).unwrap();
+        let _ = std::fs::remove_file(path);
+
+        assert_eq!(attachment.odata_type, "#microsoft.graph.fileAttachment");
+        assert!(attachment.name.starts_with("pebble-outlook-"));
+        assert_eq!(attachment.content_type, "text/plain");
+        assert_eq!(attachment.content_bytes, "aGVsbG8=");
     }
 
     #[test]

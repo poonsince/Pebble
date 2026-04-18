@@ -205,7 +205,7 @@ impl SmtpSender {
 
                 // We need to upgrade the raw TCP stream to TLS before SMTP handshake.
                 // Use tokio-rustls directly since we already have a connected stream.
-                let rustls_config = build_rustls_client_config();
+                let rustls_config = build_rustls_client_config()?;
                 let connector = tokio_rustls::TlsConnector::from(rustls_config);
                 let domain = rustls::pki_types::ServerName::try_from(self.host.clone())
                     .map_err(|e| PebbleError::Network(format!("Invalid TLS server name: {e}")))?;
@@ -296,16 +296,26 @@ async fn authenticate_and_send(
 }
 
 /// Build a rustls ClientConfig that trusts the system/webpki roots.
-fn build_rustls_client_config() -> std::sync::Arc<rustls::ClientConfig> {
+fn build_rustls_client_config() -> Result<std::sync::Arc<rustls::ClientConfig>> {
     let provider = std::sync::Arc::new(rustls::crypto::aws_lc_rs::default_provider());
     let mut root_store = rustls::RootCertStore::empty();
     root_store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
     let config = rustls::ClientConfig::builder_with_provider(provider)
         .with_safe_default_protocol_versions()
-        .expect("TLS protocol versions")
+        .map_err(|e| PebbleError::Network(format!("TLS protocol versions: {e}")))?
         .with_root_certificates(root_store)
         .with_no_client_auth();
-    std::sync::Arc::new(config)
+    Ok(std::sync::Arc::new(config))
+}
+
+#[cfg(test)]
+mod tls_config_tests {
+    use super::build_rustls_client_config;
+
+    #[test]
+    fn build_rustls_client_config_returns_result() {
+        assert!(build_rustls_client_config().is_ok());
+    }
 }
 
 // ---------------------------------------------------------------------------

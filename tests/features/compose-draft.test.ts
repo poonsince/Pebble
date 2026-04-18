@@ -11,6 +11,7 @@ describe("hasComposeDraft", () => {
         subject: "",
         rawSource: "",
         richTextHtml: "<p>Hello team</p>",
+        attachments: [],
       }),
     ).toBe(true);
   });
@@ -24,6 +25,7 @@ describe("hasComposeDraft", () => {
         subject: "",
         rawSource: "",
         richTextHtml: "<p></p>",
+        attachments: [],
       }),
     ).toBe(true);
   });
@@ -37,7 +39,22 @@ describe("hasComposeDraft", () => {
         subject: " ",
         rawSource: "   ",
         richTextHtml: "<p><br></p>",
+        attachments: [],
       }),
     ).toBe(false);
+  });
+
+  it("treats attachments as draft content", () => {
+    expect(
+      hasComposeDraft({
+        to: [],
+        cc: [],
+        bcc: [],
+        subject: "",
+        rawSource: "",
+        richTextHtml: "<p><br></p>",
+        attachments: [{ name: "report.pdf", path: "C:\\tmp\\report.pdf", size: 1234 }],
+      }),
+    ).toBe(true);
   });
 });

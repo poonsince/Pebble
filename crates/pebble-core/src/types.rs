@@ -266,6 +266,8 @@ pub struct DraftMessage {
     pub body_text: String,
     pub body_html: Option<String>,
     pub in_reply_to: Option<String>,
+    #[serde(default)]
+    pub attachment_paths: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
