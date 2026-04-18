@@ -12,7 +12,7 @@ pub enum PendingMailOpStatus {
 }
 
 impl PendingMailOpStatus {
-    fn as_str(&self) -> &'static str {
+    pub fn as_str(&self) -> &'static str {
         match self {
             Self::Pending => "pending",
             Self::InProgress => "in_progress",
@@ -97,6 +97,68 @@ impl Store {
                  ORDER BY updated_at ASC",
             )?;
             let rows = stmt.query_map(params![account_id], |row| {
+                let status: String = row.get(5)?;
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, String>(4)?,
+                    status,
+                    row.get::<_, i64>(6)?,
+                    row.get::<_, Option<String>>(7)?,
+                    row.get::<_, i64>(8)?,
+                    row.get::<_, i64>(9)?,
+                ))
+            })?;
+
+            let mut ops = Vec::new();
+            for row in rows {
+                let (
+                    id,
+                    account_id,
+                    message_id,
+                    op_type,
+                    payload_json,
+                    status,
+                    attempts,
+                    last_error,
+                    created_at,
+                    updated_at,
+                ) = row?;
+                ops.push(PendingMailOp {
+                    id,
+                    account_id,
+                    message_id,
+                    op_type,
+                    payload_json,
+                    status: status_from_str(&status)?,
+                    attempts,
+                    last_error,
+                    created_at,
+                    updated_at,
+                });
+            }
+            Ok(ops)
+        })
+    }
+
+    pub fn list_active_pending_mail_ops(
+        &self,
+        account_id: Option<&str>,
+        limit: i64,
+    ) -> Result<Vec<PendingMailOp>> {
+        self.with_read(|conn| {
+            let mut stmt = conn.prepare(
+                "SELECT id, account_id, message_id, op_type, payload_json, status,
+                        attempts, last_error, created_at, updated_at
+                 FROM pending_mail_ops
+                 WHERE status != 'done'
+                   AND (?1 IS NULL OR account_id = ?1)
+                 ORDER BY updated_at DESC
+                 LIMIT ?2",
+            )?;
+            let rows = stmt.query_map(params![account_id, limit.max(1)], |row| {
                 let status: String = row.get(5)?;
                 Ok((
                     row.get::<_, String>(0)?,
@@ -458,6 +520,61 @@ mod tests {
         let retryable_after_claim = store.list_retryable_pending_mail_ops(10).unwrap();
         assert_eq!(retryable_after_claim.len(), 1);
         assert_eq!(retryable_after_claim[0].id, failed_id);
+    }
+
+    #[test]
+    fn active_pending_mail_ops_list_filters_done_ops_accounts_and_limit() {
+        let store = Store::open_in_memory().unwrap();
+        let account = test_account();
+        store.insert_account(&account).unwrap();
+        let folder = test_folder(&account.id);
+        store.insert_folder(&folder).unwrap();
+        let message = test_message(&account.id);
+        store.insert_message(&message, &[folder.id]).unwrap();
+
+        let other_account = test_account();
+        store.insert_account(&other_account).unwrap();
+        let other_folder = test_folder(&other_account.id);
+        store.insert_folder(&other_folder).unwrap();
+        let other_message = test_message(&other_account.id);
+        store
+            .insert_message(&other_message, &[other_folder.id])
+            .unwrap();
+
+        let pending_id = store
+            .insert_pending_mail_op(&account.id, &message.id, "archive", "{}")
+            .unwrap();
+        let failed_id = store
+            .insert_pending_mail_op(&account.id, &message.id, "update_flags", "{}")
+            .unwrap();
+        let done_id = store
+            .insert_pending_mail_op(&account.id, &message.id, "delete", "{}")
+            .unwrap();
+        let other_id = store
+            .insert_pending_mail_op(&other_account.id, &other_message.id, "archive", "{}")
+            .unwrap();
+
+        store
+            .mark_pending_mail_op_failed(&failed_id, "network unavailable")
+            .unwrap();
+        store.mark_pending_mail_op_done(&done_id).unwrap();
+
+        let account_ops = store
+            .list_active_pending_mail_ops(Some(&account.id), 50)
+            .unwrap();
+        let account_op_ids: Vec<_> = account_ops.iter().map(|op| op.id.as_str()).collect();
+        assert_eq!(account_ops.len(), 2);
+        assert!(account_op_ids.contains(&pending_id.as_str()));
+        assert!(account_op_ids.contains(&failed_id.as_str()));
+        assert!(!account_op_ids.contains(&done_id.as_str()));
+        assert!(!account_op_ids.contains(&other_id.as_str()));
+        assert!(account_ops
+            .iter()
+            .all(|op| op.status != PendingMailOpStatus::Done));
+
+        let limited_ops = store.list_active_pending_mail_ops(None, 1).unwrap();
+        assert_eq!(limited_ops.len(), 1);
+        assert_ne!(limited_ops[0].status, PendingMailOpStatus::Done);
     }
 
     #[test]

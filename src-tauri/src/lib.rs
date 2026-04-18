@@ -238,6 +238,7 @@ pub fn run() {
             commands::sync_cmd::reindex_search,
             commands::notifications::set_notifications_enabled,
             commands::pending_mail_ops::get_pending_mail_ops_summary,
+            commands::pending_mail_ops::list_pending_mail_ops,
             commands::drafts::save_draft,
             commands::drafts::delete_draft,
             commands::folder_counts::get_folder_unread_counts,

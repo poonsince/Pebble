@@ -125,6 +125,7 @@
     "appearance": "Appearance",
     "shortcuts": "Shortcuts",
     "rules": "Rules",
+    "remoteWrites": "Remote Writes",
     "translation": "Translation",
     "language": "Language",
     "theme": "Theme",
@@ -183,6 +184,42 @@
     "restorePreviewKanban": "Kanban cards: {{count}}",
     "restorePreviewSize": "Size: {{kb}} KB",
     "scopeNotice": "WebDAV backup only includes settings, rules, and kanban data. Email messages are not included."
+  },
+  "pendingOps": {
+    "title": "Remote Writes",
+    "description": "Queued mail changes are retried in the background until the provider accepts them.",
+    "accountFilter": "Account",
+    "allAccounts": "All accounts",
+    "refresh": "Refresh",
+    "pending": "Pending",
+    "retrying": "Retrying",
+    "failed": "Failed",
+    "active": "Active",
+    "latestError": "Latest error",
+    "queue": "Queue",
+    "empty": "No pending remote writes.",
+    "status": "Status",
+    "operation": "Operation",
+    "attempts": "Attempts",
+    "message": "Message",
+    "account": "Account",
+    "updated": "Updated",
+    "lastError": "Last error",
+    "unknownAccount": "Unknown account",
+    "statusValue": {
+      "pending": "Pending",
+      "inProgress": "Retrying",
+      "failed": "Failed"
+    },
+    "ops": {
+      "archive": "Archive",
+      "unarchive": "Unarchive",
+      "restore": "Restore",
+      "delete": "Delete",
+      "delete_permanent": "Delete permanently",
+      "update_flags": "Update flags",
+      "move_to_folder": "Move to folder"
+    }
   },
   "about": {
     "title": "About",

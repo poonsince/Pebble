@@ -1,0 +1,76 @@
+import { fireEvent, render, screen } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
+import SettingsView from "../../../src/features/settings/SettingsView";
+
+vi.mock("react-i18next", () => ({
+  useTranslation: () => ({
+    t: (key: string, fallback?: string) => {
+      const labels: Record<string, string> = {
+        "settings.accounts": "Accounts",
+        "settings.general": "General",
+        "settings.appearance": "Appearance",
+        "settings.privacy": "Privacy",
+        "settings.rules": "Rules",
+        "settings.remoteWrites": "Remote Writes",
+        "settings.translation": "Translation",
+        "settings.shortcuts": "Shortcuts",
+        "settings.cloudSync": "Settings Backup",
+        "settings.about": "About",
+        "settings.tabs": "Settings tabs",
+      };
+      return labels[key] ?? fallback ?? key;
+    },
+  }),
+}));
+
+vi.mock("../../../src/features/settings/AccountsTab", () => ({
+  default: () => <div>Accounts panel</div>,
+}));
+
+vi.mock("../../../src/features/settings/GeneralTab", () => ({
+  default: () => <div>General panel</div>,
+}));
+
+vi.mock("../../../src/features/settings/AppearanceTab", () => ({
+  default: () => <div>Appearance panel</div>,
+}));
+
+vi.mock("../../../src/features/settings/CloudSyncTab", () => ({
+  default: () => <div>Cloud sync panel</div>,
+}));
+
+vi.mock("../../../src/features/settings/RulesTab", () => ({
+  default: () => <div>Rules panel</div>,
+}));
+
+vi.mock("../../../src/features/settings/ShortcutsTab", () => ({
+  default: () => <div>Shortcuts panel</div>,
+}));
+
+vi.mock("../../../src/features/settings/TranslateTab", () => ({
+  default: () => <div>Translation panel</div>,
+}));
+
+vi.mock("../../../src/features/settings/PrivacyTab", () => ({
+  default: () => <div>Privacy panel</div>,
+}));
+
+vi.mock("../../../src/features/settings/AboutTab", () => ({
+  default: () => <div>About panel</div>,
+}));
+
+vi.mock("../../../src/features/settings/PendingOpsTab", () => ({
+  default: () => <div>Remote queue panel</div>,
+}));
+
+describe("SettingsView", () => {
+  it("exposes the pending remote writes queue as a settings tab", () => {
+    render(<SettingsView />);
+
+    const tab = screen.getByRole("tab", { name: "Remote Writes" });
+    fireEvent.click(tab);
+
+    expect(tab.getAttribute("aria-selected")).toBe("true");
+    expect(screen.getByText("Remote queue panel")).toBeTruthy();
+  });
+});

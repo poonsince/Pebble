@@ -125,6 +125,7 @@
     "appearance": "外观",
     "shortcuts": "快捷键",
     "rules": "规则",
+    "remoteWrites": "远端写回",
     "translation": "翻译",
     "language": "语言",
     "theme": "主题",
@@ -183,6 +184,42 @@
     "restorePreviewKanban": "看板卡片：{{count}}",
     "restorePreviewSize": "大小：{{kb}} KB",
     "scopeNotice": "WebDAV 备份仅包含设置、规则和看板数据，不包含邮件消息。"
+  },
+  "pendingOps": {
+    "title": "远端写回",
+    "description": "已排队的邮件变更会在后台重试，直到服务商接受为止。",
+    "accountFilter": "账户",
+    "allAccounts": "全部账户",
+    "refresh": "刷新",
+    "pending": "待处理",
+    "retrying": "重试中",
+    "failed": "失败",
+    "active": "活跃",
+    "latestError": "最近错误",
+    "queue": "队列",
+    "empty": "没有待写回的远端操作。",
+    "status": "状态",
+    "operation": "操作",
+    "attempts": "次数",
+    "message": "邮件",
+    "account": "账户",
+    "updated": "更新时间",
+    "lastError": "最后错误",
+    "unknownAccount": "未知账户",
+    "statusValue": {
+      "pending": "待处理",
+      "inProgress": "重试中",
+      "failed": "失败"
+    },
+    "ops": {
+      "archive": "归档",
+      "unarchive": "取消归档",
+      "restore": "恢复",
+      "delete": "删除",
+      "delete_permanent": "永久删除",
+      "update_flags": "更新标记",
+      "move_to_folder": "移动到文件夹"
+    }
   },
   "about": {
     "title": "关于",

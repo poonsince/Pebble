@@ -19,3 +19,7 @@ export {
   usePendingMailOpsSummary,
   pendingMailOpsSummaryQueryKey,
 } from "./usePendingMailOpsSummary";
+export {
+  usePendingMailOpsQuery,
+  pendingMailOpsQueryKey,
+} from "./usePendingMailOpsQuery";

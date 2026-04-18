@@ -89,6 +89,20 @@ export interface PendingMailOpsSummary {
   updated_at: number | null;
 }
 
+export type PendingMailOpStatus = "pending" | "in_progress" | "failed";
+
+export interface PendingMailOp {
+  id: string;
+  account_id: string;
+  message_id: string;
+  op_type: string;
+  status: PendingMailOpStatus;
+  attempts: number;
+  last_error: string | null;
+  created_at: number;
+  updated_at: number;
+}
+
 /** @rust pebble-core/src/types.rs → RenderedHtml */
 export interface RenderedHtml {
   html: string;

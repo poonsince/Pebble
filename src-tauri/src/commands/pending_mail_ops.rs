@@ -39,6 +39,35 @@ impl From<PendingMailOpsSummary> for PendingMailOpsSummaryResponse {
     }
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct PendingMailOpResponse {
+    pub id: String,
+    pub account_id: String,
+    pub message_id: String,
+    pub op_type: String,
+    pub status: String,
+    pub attempts: i64,
+    pub last_error: Option<String>,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+impl From<PendingMailOp> for PendingMailOpResponse {
+    fn from(value: PendingMailOp) -> Self {
+        Self {
+            id: value.id,
+            account_id: value.account_id,
+            message_id: value.message_id,
+            op_type: value.op_type,
+            status: value.status.as_str().to_string(),
+            attempts: value.attempts,
+            last_error: value.last_error,
+            created_at: value.created_at,
+            updated_at: value.updated_at,
+        }
+    }
+}
+
 #[tauri::command]
 pub fn get_pending_mail_ops_summary(
     state: State<'_, AppState>,
@@ -48,6 +77,19 @@ pub fn get_pending_mail_ops_summary(
         .store
         .pending_mail_ops_summary(account_id.as_deref())
         .map(Into::into)
+}
+
+#[tauri::command]
+pub fn list_pending_mail_ops(
+    state: State<'_, AppState>,
+    account_id: Option<String>,
+    limit: Option<i64>,
+) -> std::result::Result<Vec<PendingMailOpResponse>, PebbleError> {
+    let limit = limit.unwrap_or(100).clamp(1, 500);
+    state
+        .store
+        .list_active_pending_mail_ops(account_id.as_deref(), limit)
+        .map(|ops| ops.into_iter().map(Into::into).collect())
 }
 
 pub fn queue_pending_mail_op(

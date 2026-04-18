@@ -16,6 +16,7 @@ export type {
   Label,
   Message,
   MessageSummary,
+  PendingMailOp,
   PendingMailOpsSummary,
   PrivacyMode,
   RenderedHtml,
@@ -42,6 +43,7 @@ import type {
   Label,
   Message,
   MessageSummary,
+  PendingMailOp,
   PendingMailOpsSummary,
   PrivacyMode,
   RenderedHtml,
@@ -214,6 +216,13 @@ export async function getPendingMailOpsSummary(
   accountId: string | null,
 ): Promise<PendingMailOpsSummary> {
   return invoke<PendingMailOpsSummary>("get_pending_mail_ops_summary", { accountId });
+}
+
+export async function listPendingMailOps(
+  accountId: string | null,
+  limit = 100,
+): Promise<PendingMailOp[]> {
+  return invoke<PendingMailOp[]>("list_pending_mail_ops", { accountId, limit });
 }
 
 // ─── Trusted Senders API ────────────────────────────────────────────────────
