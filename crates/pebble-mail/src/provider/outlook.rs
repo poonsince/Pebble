@@ -254,6 +254,49 @@ impl OutlookProvider {
             .map_err(|e| PebbleError::Network(format!("Graph API GET failed: {e}")))
     }
 
+    pub async fn fetch_messages_page(
+        &self,
+        folder_id: &str,
+        limit: u32,
+        cursor: Option<&str>,
+    ) -> Result<FetchResult> {
+        let select = "id,subject,bodyPreview,body,from,toRecipients,ccRecipients,isRead,flag,isDraft,receivedDateTime,internetMessageId,conversationId,hasAttachments,categories";
+        let url = match cursor {
+            Some(cursor) if !cursor.is_empty() => cursor.to_string(),
+            _ => format!(
+                "{GRAPH_API_BASE}/mailFolders/{folder_id}/messages?$top={limit}&$select={select}"
+            ),
+        };
+        let resp = self.get(&url).await?;
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let text = resp.text().await.unwrap_or_default();
+            return Err(PebbleError::Network(format!(
+                "Failed to fetch messages (status {status}): {text}"
+            )));
+        }
+        let list: GraphMessageList = resp
+            .json()
+            .await
+            .map_err(|e| PebbleError::Network(format!("Failed to parse message list: {e}")))?;
+
+        debug!(count = list.value.len(), "Fetched Outlook messages");
+
+        let messages: Vec<Message> = list
+            .value
+            .iter()
+            .map(|gm| Self::graph_message_to_message(gm, &self.account_id))
+            .collect();
+
+        let cursor_value = list.next_link.unwrap_or_default();
+        Ok(FetchResult {
+            messages,
+            cursor: SyncCursor {
+                value: cursor_value,
+            },
+        })
+    }
+
     async fn post_json<T: Serialize + Send + Sync>(
         &self,
         url: &str,
@@ -399,39 +442,7 @@ impl MailTransport for OutlookProvider {
 
     async fn fetch_messages(&self, query: &FetchQuery) -> Result<FetchResult> {
         let limit = query.limit.unwrap_or(50);
-        let select = "id,subject,bodyPreview,body,from,toRecipients,ccRecipients,isRead,flag,isDraft,receivedDateTime,internetMessageId,conversationId,hasAttachments,categories";
-        let url = format!(
-            "{GRAPH_API_BASE}/mailFolders/{}/messages?$top={limit}&$select={select}",
-            query.folder_id
-        );
-        let resp = self.get(&url).await?;
-        if !resp.status().is_success() {
-            let status = resp.status();
-            let text = resp.text().await.unwrap_or_default();
-            return Err(PebbleError::Network(format!(
-                "Failed to fetch messages (status {status}): {text}"
-            )));
-        }
-        let list: GraphMessageList = resp
-            .json()
-            .await
-            .map_err(|e| PebbleError::Network(format!("Failed to parse message list: {e}")))?;
-
-        debug!(count = list.value.len(), "Fetched Outlook messages");
-
-        let messages: Vec<Message> = list
-            .value
-            .iter()
-            .map(|gm| Self::graph_message_to_message(gm, &self.account_id))
-            .collect();
-
-        let cursor_value = list.next_link.unwrap_or_default();
-        Ok(FetchResult {
-            messages,
-            cursor: SyncCursor {
-                value: cursor_value,
-            },
-        })
+        self.fetch_messages_page(&query.folder_id, limit, None).await
     }
 
     async fn send_message(&self, message: &OutgoingMessage) -> Result<()> {

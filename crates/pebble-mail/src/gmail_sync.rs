@@ -12,7 +12,7 @@ use tokio::sync::{mpsc, watch};
 use tracing::{debug, error, info, warn};
 
 use crate::backoff::SyncBackoff;
-use crate::provider::gmail::{visible_label_ids, GmailFetchedMessage, GmailProvider};
+use crate::provider::gmail::{visible_label_ids, GmailFetchedMessage, GmailMessageRef, GmailProvider};
 use crate::sync::{
     persist_message_attachments_async, StoredMessage, SyncConfig, SyncError, SyncWorkerBase,
 };
@@ -71,6 +71,32 @@ fn build_sync_label_ids(folders: &[Folder]) -> Vec<String> {
 
 fn can_advance_gmail_cursor(failure_count: usize) -> bool {
     failure_count == 0
+}
+
+async fn collect_paginated_gmail_refs<F, Fut>(
+    label_id: &str,
+    limit: u32,
+    mut fetch_page: F,
+) -> Result<Vec<GmailMessageRef>>
+where
+    F: FnMut(String, u32, Option<String>) -> Fut,
+    Fut: Future<Output = Result<(Vec<GmailMessageRef>, Option<String>)>>,
+{
+    let mut all_refs = Vec::new();
+    let mut page_token = None;
+
+    loop {
+        let (mut refs, next_page) =
+            fetch_page(label_id.to_string(), limit, page_token.take()).await?;
+        all_refs.append(&mut refs);
+
+        match next_page {
+            Some(token) if !token.is_empty() => page_token = Some(token),
+            _ => break,
+        }
+    }
+
+    Ok(all_refs)
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -395,11 +421,17 @@ impl GmailSyncWorker {
             }
         };
 
-        // List message IDs from Gmail
-        let (msg_refs, _next_page) = self
-            .provider
-            .list_message_ids(label_id, limit, None)
-            .await?;
+        // List all message IDs from Gmail. The list endpoint is paginated and
+        // silently truncates the initial sync if the next page token is ignored.
+        let msg_refs = collect_paginated_gmail_refs(label_id, limit, |label_id, limit, page_token| {
+            let provider = Arc::clone(&self.provider);
+            async move {
+                provider
+                    .list_message_ids(&label_id, limit, page_token.as_deref())
+                    .await
+            }
+        })
+        .await?;
         if msg_refs.is_empty() {
             return Ok(GmailLabelSyncOutcome::default());
         }
@@ -846,6 +878,7 @@ impl GmailSyncWorker {
 mod tests {
     use super::*;
     use pebble_core::{Folder, FolderRole, FolderType};
+    use std::collections::VecDeque;
 
     #[test]
     fn test_build_sync_label_ids_includes_visible_custom_labels() {
@@ -931,5 +964,44 @@ mod tests {
     #[test]
     fn gmail_cursor_advances_without_failures() {
         assert!(can_advance_gmail_cursor(0));
+    }
+
+    #[tokio::test]
+    async fn collect_paginated_gmail_refs_fetches_until_next_page_is_empty() {
+        let mut pages = VecDeque::from([
+            (
+                vec![crate::provider::gmail::GmailMessageRef {
+                    id: "gmail-1".to_string(),
+                    thread_id: None,
+                }],
+                Some("page-2".to_string()),
+            ),
+            (
+                vec![crate::provider::gmail::GmailMessageRef {
+                    id: "gmail-2".to_string(),
+                    thread_id: None,
+                }],
+                None,
+            ),
+        ]);
+        let mut requested_tokens = Vec::new();
+
+        let refs = collect_paginated_gmail_refs("INBOX", 2, |label_id, limit, page_token| {
+            requested_tokens.push((label_id, limit, page_token));
+            let page = pages.pop_front().expect("expected a page request");
+            async move { Ok(page) }
+        })
+        .await
+        .unwrap();
+
+        let ids: Vec<_> = refs.into_iter().map(|r| r.id).collect();
+        assert_eq!(ids, vec!["gmail-1".to_string(), "gmail-2".to_string()]);
+        assert_eq!(
+            requested_tokens,
+            vec![
+                ("INBOX".to_string(), 2, None),
+                ("INBOX".to_string(), 2, Some("page-2".to_string())),
+            ]
+        );
     }
 }

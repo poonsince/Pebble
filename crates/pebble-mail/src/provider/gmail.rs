@@ -538,7 +538,7 @@ impl MailTransport for GmailProvider {
     }
 
     async fn send_message(&self, message: &OutgoingMessage) -> Result<()> {
-        let raw = build_raw_message(message);
+        let raw = build_raw_message(message)?;
         let encoded = base64url_encode(&raw);
         let body = serde_json::json!({ "raw": encoded });
         let resp = self
@@ -708,7 +708,7 @@ impl LabelProvider for GmailProvider {
 #[async_trait]
 impl DraftProvider for GmailProvider {
     async fn save_draft(&self, draft: &DraftMessage) -> Result<String> {
-        let raw = build_draft_raw(draft);
+        let raw = build_draft_raw(draft)?;
         let encoded = base64url_encode(&raw);
         let body = serde_json::json!({ "message": { "raw": encoded } });
         let resp = self
@@ -722,7 +722,7 @@ impl DraftProvider for GmailProvider {
     }
 
     async fn update_draft(&self, draft_id: &str, draft: &DraftMessage) -> Result<()> {
-        let raw = build_draft_raw(draft);
+        let raw = build_draft_raw(draft)?;
         let encoded = base64url_encode(&raw);
         let body = serde_json::json!({ "message": { "raw": encoded } });
         let url = format!("{GMAIL_API_BASE}/drafts/{draft_id}");
@@ -863,6 +863,38 @@ fn format_address(addr: &EmailAddress) -> String {
     }
 }
 
+fn validate_header_value(label: &str, value: &str) -> Result<()> {
+    if value.contains('\r') || value.contains('\n') {
+        return Err(PebbleError::Validation(format!(
+            "{label} contains invalid header characters"
+        )));
+    }
+    Ok(())
+}
+
+fn validate_email_address(label: &str, addr: &EmailAddress) -> Result<()> {
+    if let Some(name) = &addr.name {
+        validate_header_value(&format!("{label} display name"), name)?;
+    }
+    validate_header_value(&format!("{label} address"), &addr.address)
+}
+
+fn validate_email_addresses(label: &str, addrs: &[EmailAddress]) -> Result<()> {
+    for addr in addrs {
+        validate_email_address(label, addr)?;
+    }
+    Ok(())
+}
+
+fn quote_mime_param(label: &str, value: &str) -> Result<String> {
+    validate_header_value(label, value)?;
+    Ok(value.replace('\\', "\\\\").replace('"', "\\\""))
+}
+
+fn new_mime_boundary(prefix: &str) -> String {
+    format!("{prefix}-{}", new_id())
+}
+
 fn write_common_headers(
     raw: &mut String,
     to: &[EmailAddress],
@@ -870,7 +902,15 @@ fn write_common_headers(
     bcc: &[EmailAddress],
     subject: &str,
     in_reply_to: Option<&str>,
-) {
+) -> Result<()> {
+    validate_email_addresses("To", to)?;
+    validate_email_addresses("Cc", cc)?;
+    validate_email_addresses("Bcc", bcc)?;
+    validate_header_value("Subject", subject)?;
+    if let Some(irt) = in_reply_to {
+        validate_header_value("In-Reply-To", irt)?;
+    }
+
     let to = to.iter().map(format_address).collect::<Vec<_>>().join(", ");
     let cc = cc.iter().map(format_address).collect::<Vec<_>>().join(", ");
     let bcc = bcc.iter().map(format_address).collect::<Vec<_>>().join(", ");
@@ -887,28 +927,30 @@ fn write_common_headers(
         raw.push_str(&format!("In-Reply-To: {irt}\r\n"));
     }
     raw.push_str("MIME-Version: 1.0\r\n");
+    Ok(())
 }
 
 fn append_body(raw: &mut String, body_text: &str, body_html: Option<&str>) {
     if let Some(body_html) = body_html {
-        const BOUNDARY: &str = "pebble-gmail-boundary";
+        let boundary = new_mime_boundary("pebble-gmail-boundary");
         raw.push_str(&format!(
-            "Content-Type: multipart/alternative; boundary=\"{BOUNDARY}\"\r\n\r\n"
+            "Content-Type: multipart/alternative; boundary=\"{boundary}\"\r\n\r\n"
         ));
         raw.push_str(&format!(
-            "--{BOUNDARY}\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n{body_text}\r\n"
+            "--{boundary}\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n{body_text}\r\n"
         ));
         raw.push_str(&format!(
-            "--{BOUNDARY}\r\nContent-Type: text/html; charset=utf-8\r\n\r\n{body_html}\r\n"
+            "--{boundary}\r\nContent-Type: text/html; charset=utf-8\r\n\r\n{body_html}\r\n"
         ));
-        raw.push_str(&format!("--{BOUNDARY}--\r\n"));
+        raw.push_str(&format!("--{boundary}--\r\n"));
     } else {
         raw.push_str("Content-Type: text/plain; charset=utf-8\r\n\r\n");
         raw.push_str(body_text);
+        raw.push_str("\r\n");
     }
 }
 
-fn build_raw_message(msg: &OutgoingMessage) -> Vec<u8> {
+fn build_raw_message(msg: &OutgoingMessage) -> Result<Vec<u8>> {
     let mut raw = String::new();
     write_common_headers(
         &mut raw,
@@ -917,19 +959,19 @@ fn build_raw_message(msg: &OutgoingMessage) -> Vec<u8> {
         &msg.bcc,
         &msg.subject,
         msg.in_reply_to.as_deref(),
-    );
+    )?;
 
     if msg.attachment_paths.is_empty() {
         append_body(&mut raw, &msg.body_text, msg.body_html.as_deref());
     } else {
         // multipart/mixed: body + attachments
-        const MIXED_BOUNDARY: &str = "pebble-mixed-boundary";
+        let mixed_boundary = new_mime_boundary("pebble-mixed-boundary");
         raw.push_str(&format!(
-            "Content-Type: multipart/mixed; boundary=\"{MIXED_BOUNDARY}\"\r\n\r\n"
+            "Content-Type: multipart/mixed; boundary=\"{mixed_boundary}\"\r\n\r\n"
         ));
 
         // Body part
-        raw.push_str(&format!("--{MIXED_BOUNDARY}\r\n"));
+        raw.push_str(&format!("--{mixed_boundary}\r\n"));
         append_body(&mut raw, &msg.body_text, msg.body_html.as_deref());
 
         // Attachment parts
@@ -939,6 +981,7 @@ fn build_raw_message(msg: &OutgoingMessage) -> Vec<u8> {
                 .file_name()
                 .and_then(|n| n.to_str())
                 .unwrap_or("attachment");
+            let filename = quote_mime_param("attachment filename", filename)?;
             let data = match std::fs::read(path) {
                 Ok(d) => d,
                 Err(e) => {
@@ -947,9 +990,9 @@ fn build_raw_message(msg: &OutgoingMessage) -> Vec<u8> {
                 }
             };
             let encoded = base64_standard_encode(&data);
-            let content_type = guess_mime_type(filename);
+            let content_type = guess_mime_type(&filename);
 
-            raw.push_str(&format!("--{MIXED_BOUNDARY}\r\n"));
+            raw.push_str(&format!("--{mixed_boundary}\r\n"));
             raw.push_str(&format!(
                 "Content-Type: {content_type}; name=\"{filename}\"\r\n"
             ));
@@ -963,10 +1006,10 @@ fn build_raw_message(msg: &OutgoingMessage) -> Vec<u8> {
                 raw.push_str("\r\n");
             }
         }
-        raw.push_str(&format!("--{MIXED_BOUNDARY}--\r\n"));
+        raw.push_str(&format!("--{mixed_boundary}--\r\n"));
     }
 
-    raw.into_bytes()
+    Ok(raw.into_bytes())
 }
 
 fn base64_standard_encode(data: &[u8]) -> String {
@@ -1026,7 +1069,7 @@ fn guess_mime_type(filename: &str) -> &'static str {
     }
 }
 
-fn build_draft_raw(draft: &DraftMessage) -> Vec<u8> {
+fn build_draft_raw(draft: &DraftMessage) -> Result<Vec<u8>> {
     let message = OutgoingMessage {
         to: draft.to.clone(),
         cc: draft.cc.clone(),
@@ -1396,12 +1439,74 @@ mod tests {
             in_reply_to: None,
             attachment_paths: vec![],
         };
-        let raw = String::from_utf8(build_raw_message(&msg)).unwrap();
+        let raw = String::from_utf8(build_raw_message(&msg).unwrap()).unwrap();
         assert!(raw.contains("To: test@example.com"));
         assert!(raw.contains("Subject: Test Subject"));
         assert!(raw.contains("Hello"));
         // Should not contain Cc header when cc is empty
         assert!(!raw.contains("Cc:"));
+    }
+
+    #[test]
+    fn build_raw_message_rejects_crlf_header_injection() {
+        let msg = OutgoingMessage {
+            to: vec![EmailAddress {
+                name: Some("Alice\r\nBcc: victim@example.com".to_string()),
+                address: "alice@example.com".to_string(),
+            }],
+            cc: vec![],
+            bcc: vec![],
+            subject: "Hello\r\nBcc: victim@example.com".to_string(),
+            body_text: "Body".to_string(),
+            body_html: None,
+            in_reply_to: Some("<safe@example.com>\r\nX-Injected: yes".to_string()),
+            attachment_paths: vec![],
+        };
+
+        assert!(build_raw_message(&msg).is_err());
+    }
+
+    #[test]
+    fn build_raw_message_rejects_crlf_attachment_filename() {
+        let msg = OutgoingMessage {
+            to: vec![EmailAddress {
+                name: None,
+                address: "alice@example.com".to_string(),
+            }],
+            cc: vec![],
+            bcc: vec![],
+            subject: "Attachment".to_string(),
+            body_text: "Body".to_string(),
+            body_html: None,
+            in_reply_to: None,
+            attachment_paths: vec!["bad\r\nInjected.txt".to_string()],
+        };
+
+        assert!(build_raw_message(&msg).is_err());
+    }
+
+    #[test]
+    fn build_raw_message_uses_per_message_boundary() {
+        let msg = OutgoingMessage {
+            to: vec![EmailAddress {
+                name: None,
+                address: "alice@example.com".to_string(),
+            }],
+            cc: vec![],
+            bcc: vec![],
+            subject: "HTML update".to_string(),
+            body_text: "Plain text body".to_string(),
+            body_html: Some("<p>HTML body</p>".to_string()),
+            in_reply_to: None,
+            attachment_paths: vec![],
+        };
+
+        let first = String::from_utf8(build_raw_message(&msg).unwrap()).unwrap();
+        let second = String::from_utf8(build_raw_message(&msg).unwrap()).unwrap();
+
+        assert!(first.contains("pebble-gmail-boundary-"));
+        assert!(second.contains("pebble-gmail-boundary-"));
+        assert_ne!(first, second);
     }
 
     #[test]
@@ -1422,7 +1527,7 @@ mod tests {
             in_reply_to: Some("<msg123@example.com>".to_string()),
             attachment_paths: vec![],
         };
-        let raw = String::from_utf8(build_raw_message(&msg)).unwrap();
+        let raw = String::from_utf8(build_raw_message(&msg).unwrap()).unwrap();
         assert!(raw.contains("Cc: bob@example.com"));
         assert!(raw.contains("In-Reply-To: <msg123@example.com>"));
     }
@@ -1446,7 +1551,7 @@ mod tests {
             attachment_paths: vec![],
         };
 
-        let raw = String::from_utf8(build_raw_message(&msg)).unwrap();
+        let raw = String::from_utf8(build_raw_message(&msg).unwrap()).unwrap();
         assert!(raw.contains("Bcc: Hidden <hidden@example.com>"));
         assert!(raw.contains("multipart/alternative"));
         assert!(raw.contains("Content-Type: text/html; charset=utf-8"));
@@ -1473,7 +1578,7 @@ mod tests {
             attachment_paths: vec![path_string],
         };
 
-        let raw = String::from_utf8(build_draft_raw(&draft)).unwrap();
+        let raw = String::from_utf8(build_draft_raw(&draft).unwrap()).unwrap();
         let _ = std::fs::remove_file(path);
 
         assert!(raw.contains("multipart/mixed"));

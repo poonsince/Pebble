@@ -1,9 +1,10 @@
+use std::future::Future;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::Mutex as StdMutex;
 
-use pebble_core::traits::{FetchQuery, FolderProvider, MailTransport};
-use pebble_core::{now_timestamp, PebbleError, Result};
+use pebble_core::traits::{FetchResult, FolderProvider};
+use pebble_core::{now_timestamp, Message, PebbleError, Result};
 use pebble_store::Store;
 use tokio::sync::{mpsc, watch};
 use tracing::{info, warn};
@@ -13,6 +14,31 @@ use crate::provider::outlook::OutlookProvider;
 use crate::gmail_sync::TokenRefresher;
 use crate::sync::{StoredMessage, SyncConfig, SyncError, SyncWorkerBase, persist_message_attachments_async};
 use crate::thread::compute_thread_id;
+
+async fn collect_outlook_folder_pages<F, Fut>(
+    folder_id: &str,
+    limit: u32,
+    mut fetch_page: F,
+) -> Result<Vec<Message>>
+where
+    F: FnMut(String, u32, Option<String>) -> Fut,
+    Fut: Future<Output = Result<FetchResult>>,
+{
+    let mut messages = Vec::new();
+    let mut cursor = None;
+
+    loop {
+        let mut result = fetch_page(folder_id.to_string(), limit, cursor.take()).await?;
+        messages.append(&mut result.messages);
+
+        match result.cursor.value {
+            value if !value.is_empty() => cursor = Some(value),
+            _ => break,
+        }
+    }
+
+    Ok(messages)
+}
 
 /// A sync worker for Outlook accounts using the Microsoft Graph API.
 pub struct OutlookSyncWorker {
@@ -163,14 +189,19 @@ impl OutlookSyncWorker {
             let db_folders = self.base.store.list_folders(&self.base.account_id).unwrap_or_default();
 
             for folder in &db_folders {
-                let query = FetchQuery {
-                    folder_id: folder.remote_id.clone(),
-                    limit: Some(50),
-                };
-                match self.provider.fetch_messages(&query).await {
-                    Ok(result) => {
+                match collect_outlook_folder_pages(&folder.remote_id, 50, |folder_id, limit, cursor| {
+                    let provider = Arc::clone(&self.provider);
+                    async move {
+                        provider
+                            .fetch_messages_page(&folder_id, limit, cursor.as_deref())
+                            .await
+                    }
+                })
+                .await
+                {
+                    Ok(messages) => {
                         let remote_ids: Vec<String> =
-                            result.messages.iter().map(|m| m.remote_id.clone()).collect();
+                            messages.iter().map(|m| m.remote_id.clone()).collect();
                         let existing = self
                             .base.store
                             .get_existing_remote_ids(&self.base.account_id, &remote_ids)
@@ -180,7 +211,7 @@ impl OutlookSyncWorker {
                         // load thread mappings in a single query.
                         let ref_ids: Vec<String> = {
                             let mut refs = std::collections::HashSet::new();
-                            for msg in &result.messages {
+                            for msg in &messages {
                                 if let Some(irt) = &msg.in_reply_to {
                                     for id in irt.split_whitespace() {
                                         refs.insert(id.trim().to_string());
@@ -202,7 +233,7 @@ impl OutlookSyncWorker {
                             .get_thread_mappings_for_refs(&self.base.account_id, &ref_ids)
                             .unwrap_or_default();
 
-                        for msg in &result.messages {
+                        for msg in &messages {
                             if existing.contains(&msg.remote_id) {
                                 continue;
                             }
@@ -267,5 +298,85 @@ impl OutlookSyncWorker {
         }
 
         info!("Outlook sync task completed for account {}", self.base.account_id);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use pebble_core::traits::SyncCursor;
+    use std::collections::VecDeque;
+
+    fn make_message(remote_id: &str) -> Message {
+        let now = now_timestamp();
+        Message {
+            id: format!("local-{remote_id}"),
+            account_id: "account-1".to_string(),
+            remote_id: remote_id.to_string(),
+            message_id_header: None,
+            in_reply_to: None,
+            references_header: None,
+            thread_id: None,
+            subject: remote_id.to_string(),
+            snippet: String::new(),
+            from_address: String::new(),
+            from_name: String::new(),
+            to_list: Vec::new(),
+            cc_list: Vec::new(),
+            bcc_list: Vec::new(),
+            body_text: String::new(),
+            body_html_raw: String::new(),
+            has_attachments: false,
+            is_read: true,
+            is_starred: false,
+            is_draft: false,
+            date: now,
+            remote_version: None,
+            is_deleted: false,
+            deleted_at: None,
+            created_at: now,
+            updated_at: now,
+        }
+    }
+
+    #[tokio::test]
+    async fn collect_outlook_folder_pages_follows_next_link_until_empty() {
+        let mut pages = VecDeque::from([
+            FetchResult {
+                messages: vec![make_message("outlook-1")],
+                cursor: SyncCursor {
+                    value: "https://graph.example/next".to_string(),
+                },
+            },
+            FetchResult {
+                messages: vec![make_message("outlook-2")],
+                cursor: SyncCursor {
+                    value: String::new(),
+                },
+            },
+        ]);
+        let mut requested_cursors = Vec::new();
+
+        let messages = collect_outlook_folder_pages("folder-1", 50, |folder_id, limit, cursor| {
+            requested_cursors.push((folder_id, limit, cursor));
+            let page = pages.pop_front().expect("expected a page request");
+            async move { Ok(page) }
+        })
+        .await
+        .unwrap();
+
+        let remote_ids: Vec<_> = messages.into_iter().map(|m| m.remote_id).collect();
+        assert_eq!(remote_ids, vec!["outlook-1".to_string(), "outlook-2".to_string()]);
+        assert_eq!(
+            requested_cursors,
+            vec![
+                ("folder-1".to_string(), 50, None),
+                (
+                    "folder-1".to_string(),
+                    50,
+                    Some("https://graph.example/next".to_string()),
+                ),
+            ]
+        );
     }
 }
