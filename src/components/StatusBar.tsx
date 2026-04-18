@@ -117,10 +117,13 @@ export default function StatusBar() {
     >
       {networkStatus === "offline" ? (
         <span
+          role="status"
+          aria-live="polite"
+          aria-atomic="true"
           className="flex items-center gap-1"
           style={{ color: "var(--color-error, #ef4444)" }}
         >
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+          <svg aria-hidden="true" focusable="false" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             <line x1="1" y1="1" x2="23" y2="23" />
             <path d="M16.72 11.06A10.94 10.94 0 0 1 19 12.55" />
             <path d="M5 12.55a10.94 10.94 0 0 1 5.17-2.39" />
@@ -133,7 +136,7 @@ export default function StatusBar() {
         </span>
       ) : (
         <>
-          <span>{syncText}</span>
+          <span role="status" aria-live="polite" aria-atomic="true">{syncText}</span>
           <button
             onClick={handleSync}
             disabled={!activeAccountId}
@@ -151,6 +154,7 @@ export default function StatusBar() {
             }}
           >
             <RefreshCw
+              aria-hidden="true"
               size={13}
               style={{
                 animation: syncStatus === "syncing" ? "spin 1s linear infinite" : "none",
@@ -159,6 +163,9 @@ export default function StatusBar() {
           </button>
           {pendingRemoteWrites > 0 && (
             <span
+              role={failedRemoteWrites > 0 ? "alert" : "status"}
+              aria-live={failedRemoteWrites > 0 ? "assertive" : "polite"}
+              aria-atomic="true"
               className="flex items-center gap-1 truncate"
               title={pendingOpsSummary?.last_error ?? pendingRemoteText}
               style={{
@@ -168,7 +175,7 @@ export default function StatusBar() {
                 maxWidth: "220px",
               }}
             >
-              {failedRemoteWrites > 0 ? <AlertCircle size={13} /> : <Clock size={13} />}
+              {failedRemoteWrites > 0 ? <AlertCircle aria-hidden="true" size={13} /> : <Clock aria-hidden="true" size={13} />}
               <span className="truncate">{pendingRemoteText}</span>
             </span>
           )}
@@ -177,6 +184,9 @@ export default function StatusBar() {
 
       {lastMailError && (
         <span
+          role="alert"
+          aria-live="assertive"
+          aria-atomic="true"
           className="truncate"
           style={{ color: "var(--color-error, #ef4444)" }}
         >
@@ -186,7 +196,7 @@ export default function StatusBar() {
 
       <span className="ml-auto flex items-center gap-1">
         {notificationsEnabled && (
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+          <svg aria-hidden="true" focusable="false" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
             <path d="M13.73 21a2 2 0 0 1-3.46 0" />
           </svg>

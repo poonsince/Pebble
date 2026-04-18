@@ -123,6 +123,4 @@ textarea:focus-visible {
   outline-offset: -1px;
 }
 
-/* Tiptap editor */
-.tiptap { outline: none; }
-.tiptap:focus { outline: none; }
+/* Tiptap editor uses the global :focus-visible ring. */

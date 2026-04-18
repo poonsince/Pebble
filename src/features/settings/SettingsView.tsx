@@ -81,7 +81,7 @@ export default function SettingsView() {
               fontSize: "13px",
               cursor: "pointer",
               borderRight: activeTab === id ? "2px solid var(--color-accent)" : "2px solid transparent",
-              transition: "all 0.15s ease",
+              transition: "background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease",
             }}
           >
             {t(TAB_LABEL_KEYS[id])}

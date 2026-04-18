@@ -82,4 +82,14 @@ describe("SettingsView", () => {
     expect(tab.getAttribute("aria-selected")).toBe("true");
     expect(screen.getByText("Remote queue panel")).toBeTruthy();
   });
+
+  it("does not animate all properties on settings tabs", () => {
+    render(<SettingsView />);
+
+    const tab = screen.getByRole("tab", { name: "Accounts" });
+
+    expect(tab.style.transition).not.toContain("all");
+    expect(tab.style.transition).toContain("background-color");
+    expect(tab.style.transition).toContain("border-color");
+  });
 });

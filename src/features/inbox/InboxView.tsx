@@ -257,7 +257,11 @@ function ThreadList({ threads, selectedThreadId, onSelectThread, loading }: {
 
   return (
     <div ref={parentRef} style={{ height: "100%", overflow: "auto" }}>
-      <div style={{ height: `${virtualizer.getTotalSize()}px`, position: "relative" }}>
+      <div
+        role="listbox"
+        aria-label={t("inbox.threadList", "Threads")}
+        style={{ height: `${virtualizer.getTotalSize()}px`, position: "relative" }}
+      >
         {virtualizer.getVirtualItems().map((virtualItem) => {
           const thread = threads[virtualItem.index];
           return (

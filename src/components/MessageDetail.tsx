@@ -327,7 +327,7 @@ export default function MessageDetail({ messageId, onBack, folderRole }: Props) 
         tabIndex={0}
         role="region"
         aria-label={t("messageDetail.body", "Message body")}
-        style={{ flex: 1, overflow: "auto", padding: "16px", outline: "none" }}
+        style={{ flex: 1, overflow: "auto", padding: "16px" }}
         onContextMenu={handleContextMenu}
         onKeyUp={handleContentKeyUp}
       >

@@ -289,7 +289,11 @@ export default function SearchView() {
           )}
 
           {!loading && results.length > 0 && (
-            <div style={{ height: `${virtualizer.getTotalSize()}px`, width: "100%", position: "relative" }}>
+            <div
+              role="listbox"
+              aria-label={t("search.results", "Search results")}
+              style={{ height: `${virtualizer.getTotalSize()}px`, width: "100%", position: "relative" }}
+            >
               {virtualizer.getVirtualItems().map((virtualItem) => {
                 const hit = results[virtualItem.index];
                 return (

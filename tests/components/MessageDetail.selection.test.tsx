@@ -128,4 +128,12 @@ describe("MessageDetail selected-text context actions", () => {
     expect(preventDefault).toHaveBeenCalled();
     expect(screen.getByRole("toolbar", { name: "Selected text actions" })).toBeTruthy();
   });
+
+  it("does not suppress the keyboard focus outline on the message body", () => {
+    render(<MessageDetail messageId="message-1" onBack={vi.fn()} />);
+
+    const body = screen.getByRole("region", { name: "Message body" });
+
+    expect(body.getAttribute("style")).not.toContain("outline: none");
+  });
 });
