@@ -19,6 +19,8 @@ interface Props {
   loading: boolean;
   onToggleStar?: (messageId: string, newStarred: boolean) => void;
   onLoadMore?: () => void;
+  hasNextPage?: boolean;
+  isFetchingNextPage?: boolean;
 }
 
 export default function MessageList({
@@ -28,6 +30,8 @@ export default function MessageList({
   loading,
   onToggleStar,
   onLoadMore,
+  hasNextPage = false,
+  isFetchingNextPage = false,
 }: Props) {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
@@ -205,15 +209,19 @@ export default function MessageList({
                   batchSelected={selectedMessageIds.has(message.id)}
                   onToggleBatchSelect={toggleMessageSelection}
                   spamFolderId={spamFolderId}
+                  folderRole={activeFolder?.role}
                 />
               </div>
             );
           })}
         </div>
-        {onLoadMore && messages.length > 0 && messages.length % 50 === 0 && (
+        {onLoadMore && hasNextPage && (
           <div style={{ padding: "12px", textAlign: "center" }}>
             <button
-              onClick={onLoadMore}
+              onClick={() => {
+                if (!isFetchingNextPage) onLoadMore();
+              }}
+              disabled={isFetchingNextPage}
               style={{
                 padding: "6px 20px",
                 fontSize: "13px",
@@ -221,10 +229,11 @@ export default function MessageList({
                 borderRadius: "6px",
                 background: "transparent",
                 color: "var(--color-text-secondary)",
-                cursor: "pointer",
+                cursor: isFetchingNextPage ? "default" : "pointer",
+                opacity: isFetchingNextPage ? 0.7 : 1,
               }}
             >
-              {t("common.loadMore", "Load more")}
+              {isFetchingNextPage ? t("common.loading", "Loading...") : t("common.loadMore", "Load more")}
             </button>
           </div>
         )}

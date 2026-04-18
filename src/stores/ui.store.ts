@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import i18n from "@/lib/i18n";
 import { useComposeStore } from "./compose.store";
+import { useMailStore } from "./mail.store";
 
 export type ActiveView = "inbox" | "kanban" | "settings" | "search" | "snoozed" | "starred" | "compose";
 export type SettingsTab = "accounts" | "general" | "appearance" | "privacy" | "rules" | "remoteWrites" | "translation" | "shortcuts" | "cloudSync" | "about";
@@ -32,6 +33,7 @@ interface UIState {
   previousView: ActiveView;
   toggleSidebar: () => void;
   setActiveView: (view: ActiveView) => void;
+  openMessageInInbox: (messageId: string) => void;
   setTheme: (theme: Theme) => void;
   setLanguage: (lang: Language) => void;
   setSyncStatus: (status: "idle" | "syncing" | "error") => void;
@@ -83,6 +85,16 @@ export const useUIStore = create<UIState>((set) => ({
     }
 
     set({ activeView: view });
+  },
+  openMessageInInbox: (messageId) => {
+    useMailStore.setState({
+      selectedMessageId: messageId,
+      selectedThreadId: null,
+      threadView: false,
+      selectedMessageIds: new Set(),
+      batchMode: false,
+    });
+    set({ activeView: "inbox" });
   },
   setTheme: (theme) => {
     localStorage.setItem("pebble-theme", theme);

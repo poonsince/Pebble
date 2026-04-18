@@ -1,8 +1,8 @@
 import { memo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
-import { Star, Paperclip, Archive, LayoutGrid, ShieldAlert } from "lucide-react";
-import type { Label, MessageSummary } from "@/lib/api";
+import { Star, Paperclip, Archive, LayoutGrid, ShieldAlert, RotateCcw } from "lucide-react";
+import type { Folder, Label, MessageSummary } from "@/lib/api";
 import { updateMessageFlags, archiveMessage, moveToFolder } from "@/lib/api";
 import { useKanbanStore } from "@/stores/kanban.store";
 import { useToastStore } from "@/stores/toast.store";
@@ -18,6 +18,7 @@ interface Props {
   batchSelected?: boolean;
   onToggleBatchSelect?: (messageId: string) => void;
   spamFolderId?: string;
+  folderRole?: Folder["role"];
 }
 
 function formatDate(timestamp: number): string {
@@ -35,12 +36,16 @@ function formatDate(timestamp: number): string {
   return date.toLocaleDateString([], { month: "short", day: "numeric" });
 }
 
-function MessageItem({ message, labels = [], isSelected, onClick, onToggleStar, batchMode, batchSelected, onToggleBatchSelect, spamFolderId }: Props) {
+function MessageItem({ message, labels = [], isSelected, onClick, onToggleStar, batchMode, batchSelected, onToggleBatchSelect, spamFolderId, folderRole }: Props) {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
   const [showActions, setShowActions] = useState(false);
   const fontWeight = message.is_read ? "normal" : "600";
   const inKanban = useKanbanStore((s) => s.cardIdSet.has(message.id));
+  const archiveActionLabel = folderRole === "archive"
+    ? t("messageActions.unarchive", "Unarchive")
+    : t("messageActions.archive", "Archive");
+  const ArchiveActionIcon = folderRole === "archive" ? RotateCcw : Archive;
 
   return (
     <div
@@ -211,11 +216,14 @@ function MessageItem({ message, labels = [], isSelected, onClick, onToggleStar, 
                 })
                 .catch(() => {
                   queryClient.invalidateQueries({ queryKey: ["messages"] });
-                  useToastStore.getState().addToast({ message: t("messageActions.archiveFailed", "Failed to archive"), type: "error" });
+                  const msg = folderRole === "archive"
+                    ? t("messageActions.unarchiveFailed", "Failed to unarchive")
+                    : t("messageActions.archiveFailed", "Failed to archive");
+                  useToastStore.getState().addToast({ message: msg, type: "error" });
                 });
             }}
-            aria-label={t("messageActions.archive")}
-            title={t("messageActions.archive")}
+            aria-label={archiveActionLabel}
+            title={archiveActionLabel}
             style={{
               padding: "4px",
               border: "none",
@@ -227,7 +235,7 @@ function MessageItem({ message, labels = [], isSelected, onClick, onToggleStar, 
               color: "var(--color-text-secondary)",
             }}
           >
-            <Archive size={14} />
+            <ArchiveActionIcon size={14} />
           </button>
           {spamFolderId && (
             <button

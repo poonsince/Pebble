@@ -4,7 +4,6 @@ import { Clock, Bell } from "lucide-react";
 import { extractErrorMessage } from "@/lib/extractErrorMessage";
 import type { SnoozedMessage, Message } from "@/lib/api";
 import { listSnoozed, unsnoozeMessage, getMessagesBatch } from "@/lib/api";
-import { useMailStore } from "@/stores/mail.store";
 import { useUIStore } from "@/stores/ui.store";
 import { useToastStore } from "@/stores/toast.store";
 
@@ -18,6 +17,7 @@ export default function SnoozedView() {
   const [entries, setEntries] = useState<SnoozedEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const openMessageInInbox = useUIStore((s) => s.openMessageInInbox);
 
   useEffect(() => {
     loadSnoozed();
@@ -55,8 +55,7 @@ export default function SnoozedView() {
   }
 
   function handleOpen(messageId: string) {
-    useMailStore.getState().setSelectedMessage(messageId);
-    useUIStore.getState().setActiveView("inbox");
+    openMessageInInbox(messageId);
   }
 
   function formatSnoozeTime(timestamp: number): string {

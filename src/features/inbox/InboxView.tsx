@@ -192,6 +192,8 @@ export default function InboxView() {
               onSelectMessage={setSelectedMessage}
               loading={loadingMessages}
               onLoadMore={handleLoadMore}
+              hasNextPage={hasNextPage}
+              isFetchingNextPage={isFetchingNextPage}
               onToggleStar={handleToggleStar}
             />
           )}

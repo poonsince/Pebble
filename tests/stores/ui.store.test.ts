@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useComposeStore } from "../../src/stores/compose.store";
+import { useMailStore } from "../../src/stores/mail.store";
 import { useUIStore } from "../../src/stores/ui.store";
 
 describe("UIStore", () => {
@@ -25,6 +26,15 @@ describe("UIStore", () => {
       composeDirty: false,
       showComposeLeaveConfirm: false,
       pendingView: null,
+    });
+    useMailStore.setState({
+      activeAccountId: null,
+      activeFolderId: null,
+      selectedMessageId: null,
+      selectedThreadId: null,
+      threadView: false,
+      selectedMessageIds: new Set(),
+      batchMode: false,
     });
   });
 
@@ -52,6 +62,26 @@ describe("UIStore", () => {
     expect(useUIStore.getState().activeView).toBe("kanban");
     useUIStore.getState().setActiveView("settings");
     expect(useUIStore.getState().activeView).toBe("settings");
+  });
+
+  it("opens a message in inbox by clearing stale thread selection", () => {
+    useUIStore.setState({ activeView: "snoozed" });
+    useMailStore.setState({
+      selectedMessageId: null,
+      selectedThreadId: "thread-1",
+      threadView: true,
+      selectedMessageIds: new Set(["message-1"]),
+      batchMode: true,
+    });
+
+    useUIStore.getState().openMessageInInbox("message-2");
+
+    expect(useUIStore.getState().activeView).toBe("inbox");
+    expect(useMailStore.getState().selectedMessageId).toBe("message-2");
+    expect(useMailStore.getState().selectedThreadId).toBe(null);
+    expect(useMailStore.getState().threadView).toBe(false);
+    expect(useMailStore.getState().selectedMessageIds.size).toBe(0);
+    expect(useMailStore.getState().batchMode).toBe(false);
   });
 
   it("stores context navigation state for selected-text actions", () => {
