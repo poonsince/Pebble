@@ -17,6 +17,7 @@ import { useDeferredValue, useEffect, lazy, Suspense, Component, type ReactNode,
 import { createLazyViewPreloader, scheduleLazyViewPreload } from "./lazyViewPreload";
 import { useRealtimePreferenceSync } from "./useRealtimePreferenceSync";
 import { useRealtimeSyncTriggers } from "./useRealtimeSyncTriggers";
+import { useNotificationOpenNavigation } from "./useNotificationOpenNavigation";
 
 const loadSettingsView = () => import("../features/settings/SettingsView");
 const loadComposeView = () => import("../features/compose/ComposeView");
@@ -67,6 +68,7 @@ export default function Layout() {
   useNetworkStatus();
   useRealtimePreferenceSync();
   useRealtimeSyncTriggers();
+  useNotificationOpenNavigation();
 
   // Re-register commands when language changes
   useEffect(() => {

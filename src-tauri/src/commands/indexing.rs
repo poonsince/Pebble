@@ -119,6 +119,95 @@ fn new_mail_notification_body(stored: &pebble_mail::StoredMessage) -> String {
     }
 }
 
+fn notification_open_payload(message_id: &str) -> serde_json::Value {
+    serde_json::json!({
+        "message_id": message_id,
+    })
+}
+
+fn open_message_from_notification(app: &tauri::AppHandle, message_id: &str) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.unminimize();
+        let _ = window.show();
+        let _ = window.set_focus();
+    }
+    let _ = app.emit(
+        events::MAIL_NOTIFICATION_OPEN,
+        notification_open_payload(message_id),
+    );
+}
+
+fn show_default_new_mail_notification(app: &tauri::AppHandle, body: &str) -> Result<(), String> {
+    app.notification()
+        .builder()
+        .title("Pebble - New Mail")
+        .body(body)
+        .show()
+        .map_err(|e| e.to_string())
+}
+
+#[cfg(windows)]
+fn windows_notification_app_id(app: &tauri::AppHandle) -> String {
+    use std::path::MAIN_SEPARATOR as SEP;
+
+    let is_dev_build_dir = tauri::utils::platform::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(|parent| parent.display().to_string()))
+        .is_some_and(|curr_dir| {
+            curr_dir.ends_with(format!("{SEP}target{SEP}debug").as_str())
+                || curr_dir.ends_with(format!("{SEP}target{SEP}release").as_str())
+        });
+
+    if is_dev_build_dir {
+        tauri_winrt_notification::Toast::POWERSHELL_APP_ID.to_string()
+    } else {
+        app.config().identifier.clone()
+    }
+}
+
+#[cfg(windows)]
+fn show_windows_new_mail_notification(
+    app: &tauri::AppHandle,
+    body: &str,
+    message_id: &str,
+) -> Result<(), String> {
+    let app_handle = app.clone();
+    let message_id = message_id.to_string();
+    tauri_winrt_notification::Toast::new(&windows_notification_app_id(app))
+        .title("Pebble - New Mail")
+        .text1(body)
+        .duration(tauri_winrt_notification::Duration::Short)
+        .on_activated(move |_action| {
+            open_message_from_notification(&app_handle, &message_id);
+            Ok(())
+        })
+        .show()
+        .map_err(|e| format!("{e:?}"))
+}
+
+fn show_new_mail_notification(
+    app: &tauri::AppHandle,
+    stored: &pebble_mail::StoredMessage,
+) -> Result<(), String> {
+    let body = new_mail_notification_body(stored);
+
+    #[cfg(windows)]
+    {
+        match show_windows_new_mail_notification(app, &body, &stored.message.id) {
+            Ok(()) => Ok(()),
+            Err(e) => {
+                warn!("Failed to show clickable Windows notification, falling back: {e}");
+                show_default_new_mail_notification(app, &body)
+            }
+        }
+    }
+
+    #[cfg(not(windows))]
+    {
+        show_default_new_mail_notification(app, &body)
+    }
+}
+
 fn maybe_send_new_mail_notification(
     app: &tauri::AppHandle,
     store: &Store,
@@ -134,13 +223,7 @@ fn maybe_send_new_mail_notification(
 
     match should_send_new_mail_notification(store, stored) {
         Ok(true) => {
-            if let Err(e) = app
-                .notification()
-                .builder()
-                .title("Pebble - New Mail")
-                .body(&new_mail_notification_body(stored))
-                .show()
-            {
+            if let Err(e) = show_new_mail_notification(app, stored) {
                 warn!("Failed to show new mail notification: {e}");
             }
         }
@@ -447,7 +530,10 @@ fn queue_remote_rule_action(
 
 #[cfg(test)]
 mod rule_writeback_tests {
-    use super::{apply_rule_action, new_mail_event_payload, should_send_new_mail_notification};
+    use super::{
+        apply_rule_action, new_mail_event_payload, notification_open_payload,
+        should_send_new_mail_notification,
+    };
     use pebble_core::*;
     use pebble_rules::types::RuleAction;
     use pebble_store::pending_ops::PendingMailOpStatus;
@@ -607,6 +693,13 @@ mod rule_writeback_tests {
         };
 
         assert!(should_send_new_mail_notification(&store, &stored).unwrap());
+    }
+
+    #[test]
+    fn notification_open_payload_identifies_clicked_message() {
+        let payload = notification_open_payload("message-1");
+
+        assert_eq!(payload["message_id"], "message-1");
     }
 
     #[test]

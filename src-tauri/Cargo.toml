@@ -29,5 +29,8 @@ lettre = { workspace = true }
 reqwest = { workspace = true }
 semver = { workspace = true }
 
+[target.'cfg(windows)'.dependencies]
+tauri-winrt-notification = "0.7"
+
 [build-dependencies]
 tauri-build = { workspace = true }
