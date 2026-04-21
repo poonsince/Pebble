@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
     setLastMailError: vi.fn(),
     realtimeStatusByAccount: {},
     setRealtimeStatus: vi.fn(),
+    notificationsEnabled: true,
   },
   mailState: {
     activeAccountId: "account-1" as string | null,
@@ -98,5 +99,22 @@ describe("StatusBar realtime mail events", () => {
     expect(mocks.invalidateQueries).toHaveBeenCalledWith({ queryKey: ["folders", "account-1"] });
     expect(mocks.invalidateQueries).toHaveBeenCalledWith({ queryKey: ["folder-unread-counts", "account-1"] });
     expect(mocks.invalidateQueries).not.toHaveBeenCalledWith({ queryKey: ["folders"] });
+  });
+
+  it("shows manual mode when backend reports background sync is stopped", () => {
+    mocks.uiState.realtimeStatusByAccount = {
+      "account-1": {
+        account_id: "account-1",
+        mode: "manual",
+        provider: "imap",
+        last_success_at: null,
+        next_retry_at: null,
+        message: null,
+      },
+    };
+
+    render(<StatusBar />);
+
+    expect(document.body.textContent).toContain("Manual only");
   });
 });

@@ -90,7 +90,9 @@ async fn start_sync_inner(
         Ok(None) => {
             let mut handles = state.sync_handles.lock().await;
             handles.remove(&account_id);
-            return Err(PebbleError::Internal(format!("Account not found: {account_id}")));
+            return Err(PebbleError::Internal(format!(
+                "Account not found: {account_id}"
+            )));
         }
         Err(e) => {
             let mut handles = state.sync_handles.lock().await;
@@ -131,7 +133,13 @@ async fn start_sync_inner(
     let store_for_rules = Arc::clone(&state.store);
     let app_for_index = app.clone();
     tokio::spawn(async move {
-        indexing::index_new_messages(&search, &store_for_rules, &mut message_rx, Some(app_for_index)).await;
+        indexing::index_new_messages(
+            &search,
+            &store_for_rules,
+            &mut message_rx,
+            Some(app_for_index),
+        )
+        .await;
     });
 
     let app_for_progress = app.clone();
@@ -211,6 +219,20 @@ fn realtime_status_payload(
     }
 }
 
+fn manual_realtime_status_payload(
+    account_id: &str,
+    provider: &ProviderType,
+) -> RealtimeStatusPayload {
+    realtime_status_payload(
+        account_id,
+        provider,
+        RealtimeMode::Manual,
+        None,
+        None,
+        Some("Manual only".to_string()),
+    )
+}
+
 fn realtime_error_mode(sync_error: &pebble_mail::SyncError) -> RealtimeMode {
     let text = format!(
         "{} {}",
@@ -250,16 +272,24 @@ fn realtime_preference_poll_interval(mode: &str) -> std::result::Result<u64, Peb
         "balanced" => Ok(15),
         "battery" => Ok(60),
         "manual" => Ok(0),
-        other => Err(PebbleError::Validation(format!("Invalid realtime preference: {other}"))),
+        other => Err(PebbleError::Validation(format!(
+            "Invalid realtime preference: {other}"
+        ))),
     }
 }
 
-fn imap_initial_realtime_mode(_config: &SyncConfig) -> RealtimeMode {
-    RealtimeMode::Polling
+fn imap_initial_realtime_mode(config: &SyncConfig) -> RealtimeMode {
+    if config.manual_only() {
+        RealtimeMode::Manual
+    } else {
+        RealtimeMode::Polling
+    }
 }
 
 fn imap_capability_realtime_mode(config: &SyncConfig, supports_idle: bool) -> RealtimeMode {
-    if !config.manual_only() && supports_idle {
+    if config.manual_only() {
+        RealtimeMode::Manual
+    } else if supports_idle {
         RealtimeMode::Realtime
     } else {
         RealtimeMode::Polling
@@ -444,7 +474,10 @@ fn build_sync_task(
                     events::MAIL_SYNC_COMPLETE,
                     serde_json::json!({ "account_id": &account_id_for_progress }),
                 );
-                info!("Outlook sync task completed for account {}", account_id_clone);
+                info!(
+                    "Outlook sync task completed for account {}",
+                    account_id_clone
+                );
             })
         }
         ProviderType::Imap => {
@@ -504,7 +537,10 @@ fn build_sync_task(
                             realtime_status_payload(
                                 &account_id_for_runtime_status,
                                 &ProviderType::Imap,
-                                imap_capability_realtime_mode(&config_for_runtime_status, supports_idle),
+                                imap_capability_realtime_mode(
+                                    &config_for_runtime_status,
+                                    supports_idle,
+                                ),
                                 Some(now_timestamp_secs()),
                                 None,
                                 if supports_idle {
@@ -516,10 +552,16 @@ fn build_sync_task(
                         );
                     }
                 });
-                let worker = SyncWorker::new(account_id_clone.clone(), provider, store, stop_rx, attachments_dir)
-                    .with_error_tx(error_tx)
-                    .with_message_tx(message_tx)
-                    .with_runtime_status_tx(runtime_status_tx);
+                let worker = SyncWorker::new(
+                    account_id_clone.clone(),
+                    provider,
+                    store,
+                    stop_rx,
+                    attachments_dir,
+                )
+                .with_error_tx(error_tx)
+                .with_message_tx(message_tx)
+                .with_runtime_status_tx(runtime_status_tx);
                 worker.run(config, Some(trigger_rx)).await;
                 let _ = app_for_progress.emit(
                     events::MAIL_SYNC_COMPLETE,
@@ -540,9 +582,23 @@ pub async fn trigger_sync(
     reason: String,
 ) -> std::result::Result<(), PebbleError> {
     let trigger = SyncTrigger::from_reason(&reason);
-    let handles = state.sync_handles.lock().await;
-    if let Some(handle) = handles.get(&account_id) {
-        let _ = handle.trigger_tx.send(trigger);
+    let mut handles = state.sync_handles.lock().await;
+    let should_remove = match handles.get(&account_id) {
+        Some(handle) if handle.task.is_finished() => true,
+        Some(handle) => {
+            let send_failed = handle.trigger_tx.send(trigger).is_err();
+            if send_failed {
+                warn!(
+                    "Sync trigger channel was already closed for account {}",
+                    account_id
+                );
+            }
+            should_drop_trigger_handle(false, send_failed)
+        }
+        None => false,
+    };
+    if should_remove {
+        handles.remove(&account_id);
     }
     Ok(())
 }
@@ -561,7 +617,10 @@ async fn stop_sync_inner(state: &AppState, account_id: &str) {
     if let Some(handle) = handles.remove(account_id) {
         if should_send_stop_signal_to_handle(handle.task.is_finished()) {
             if let Err(e) = handle.stop_tx.send(true) {
-                warn!("Sync stop channel was already closed for account {}: {}", account_id, e);
+                warn!(
+                    "Sync stop channel was already closed for account {}: {}",
+                    account_id, e
+                );
             }
             handle.task.abort();
         }
@@ -572,6 +631,10 @@ fn should_send_stop_signal_to_handle(task_finished: bool) -> bool {
     !task_finished
 }
 
+fn should_drop_trigger_handle(task_finished: bool, send_failed: bool) -> bool {
+    task_finished || send_failed
+}
+
 #[tauri::command]
 pub async fn set_realtime_preference(
     app: tauri::AppHandle,
@@ -579,6 +642,7 @@ pub async fn set_realtime_preference(
     mode: String,
 ) -> std::result::Result<(), PebbleError> {
     let poll_interval_secs = realtime_preference_poll_interval(&mode)?;
+    let accounts = state.store.list_accounts()?;
     let running_account_ids = {
         let handles = state.sync_handles.lock().await;
         handles.keys().cloned().collect::<Vec<_>>()
@@ -589,19 +653,24 @@ pub async fn set_realtime_preference(
     }
 
     if poll_interval_secs == 0 {
+        for account in accounts {
+            emit_realtime_status(
+                &app,
+                manual_realtime_status_payload(&account.id, &account.provider),
+            );
+        }
         return Ok(());
     }
 
-    let account_ids = state
-        .store
-        .list_accounts()?
+    let account_ids = accounts
         .into_iter()
         .map(|account| account.id)
         .collect::<Vec<_>>();
 
     let mut start_summary = RealtimePreferenceStartSummary::default();
     for account_id in account_ids {
-        let result = start_sync_inner(&app, &state, account_id.clone(), Some(poll_interval_secs)).await;
+        let result =
+            start_sync_inner(&app, &state, account_id.clone(), Some(poll_interval_secs)).await;
         if let Err(e) = &result {
             warn!("Failed to apply realtime preference to account {account_id}: {e}");
         }
@@ -621,15 +690,13 @@ pub async fn set_realtime_preference(
 
 /// Rebuild the search index from all messages currently in the store.
 #[tauri::command]
-pub async fn reindex_search(
-    state: State<'_, AppState>,
-) -> std::result::Result<u32, PebbleError> {
+pub async fn reindex_search(state: State<'_, AppState>) -> std::result::Result<u32, PebbleError> {
     let store = Arc::clone(&state.store);
     let search = Arc::clone(&state.search);
 
     tokio::task::spawn_blocking(move || indexing::do_reindex(&store, &search))
-    .await
-    .map_err(|e| PebbleError::Internal(format!("Reindex task failed: {e}")))?
+        .await
+        .map_err(|e| PebbleError::Internal(format!("Reindex task failed: {e}")))?
 }
 
 #[allow(dead_code)]
@@ -694,6 +761,18 @@ mod trigger_tests {
     }
 
     #[test]
+    fn manual_preference_status_payload_reports_manual_mode() {
+        let payload = manual_realtime_status_payload("account-1", &ProviderType::Gmail);
+
+        let json = serde_json::to_value(payload).unwrap();
+
+        assert_eq!(json["account_id"], "account-1");
+        assert_eq!(json["provider"], "gmail");
+        assert_eq!(json["mode"], "manual");
+        assert_eq!(json["message"], "Manual only");
+    }
+
+    #[test]
     fn realtime_preference_start_summary_keeps_successes_after_account_failure() {
         let mut summary = RealtimePreferenceStartSummary::default();
 
@@ -712,6 +791,13 @@ mod trigger_tests {
     fn finished_sync_handle_does_not_need_stop_signal() {
         assert!(!should_send_stop_signal_to_handle(true));
         assert!(should_send_stop_signal_to_handle(false));
+    }
+
+    #[test]
+    fn trigger_handle_is_dropped_when_finished_or_channel_closed() {
+        assert!(should_drop_trigger_handle(true, false));
+        assert!(should_drop_trigger_handle(false, true));
+        assert!(!should_drop_trigger_handle(false, false));
     }
 
     #[test]

@@ -275,6 +275,10 @@ export async function setRealtimePreference(mode: RealtimePreference): Promise<v
   return invoke<void>("set_realtime_preference", { mode });
 }
 
+export async function setNotificationsEnabled(enabled: boolean): Promise<void> {
+  return invoke<void>("set_notifications_enabled", { enabled });
+}
+
 export async function stopSync(accountId: string): Promise<void> {
   return invoke<void>("stop_sync", { accountId });
 }

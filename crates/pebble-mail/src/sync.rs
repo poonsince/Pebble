@@ -1,5 +1,6 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use crate::backoff::SyncBackoff;
 use pebble_core::{new_id, now_timestamp, Message, Result};
@@ -17,7 +18,7 @@ pub struct SyncError {
 
 use crate::parser::{parse_raw_email, AttachmentData, ParsedMessage};
 use crate::provider::imap_provider::ImapMailProvider;
-use crate::realtime_policy::SyncTrigger;
+use crate::realtime_policy::{RealtimePollPolicy, RealtimeRuntimeState, SyncTrigger};
 use crate::reconcile;
 use crate::thread::compute_thread_id;
 
@@ -305,6 +306,10 @@ impl SyncConfig {
     pub fn manual_only(&self) -> bool {
         self.poll_interval_secs == 0
     }
+}
+
+fn imap_poll_policy(config: &SyncConfig) -> RealtimePollPolicy {
+    RealtimePollPolicy::from_foreground_interval_secs(config.poll_interval_secs)
 }
 
 fn should_notify_imap_startup_fetch(since_uid: Option<u32>) -> bool {
@@ -1002,7 +1007,9 @@ impl SyncWorker {
                             backoff.record_success();
                         }
                         Err(e) => {
-                            warn!("Failed to connect IMAP IDLE watcher for account {account_id}: {e}");
+                            warn!(
+                                "Failed to connect IMAP IDLE watcher for account {account_id}: {e}"
+                            );
                             let delay = backoff.record_failure();
                             match tokio::time::timeout(delay, stop_rx.changed()).await {
                                 Ok(Ok(())) if *stop_rx.borrow() => break,
@@ -1096,10 +1103,9 @@ impl SyncWorker {
             return;
         }
 
-        let poll_interval = tokio::time::Duration::from_secs(config.poll_interval_secs);
+        let poll_policy = imap_poll_policy(&config);
         let reconcile_interval = tokio::time::Duration::from_secs(config.reconcile_interval_secs);
 
-        let mut poll_ticker = tokio::time::interval(poll_interval);
         let mut reconcile_ticker = tokio::time::interval(reconcile_interval);
 
         let supports_idle = self.provider.inner().supports_idle().await;
@@ -1130,6 +1136,7 @@ impl SyncWorker {
         let mut last_exists: u32 = 0;
         let mut backoff = SyncBackoff::new();
         let mut trigger_rx = trigger_rx;
+        let mut runtime = RealtimeRuntimeState::new(Duration::from_secs(60), Instant::now());
         let (idle_trigger_tx, mut idle_trigger_rx) = mpsc::unbounded_channel();
         let mut idle_watcher = None;
 
@@ -1167,12 +1174,11 @@ impl SyncWorker {
         let mut idle_watcher_active = idle_watcher.is_some();
 
         loop {
-            tokio::select! {
-                _ = poll_ticker.tick() => {
-                    if idle_watcher_active {
-                        continue;
-                    }
+            let next_poll_delay =
+                poll_policy.next_delay(runtime.context(backoff.failure_count(), Instant::now()));
 
+            tokio::select! {
+                _ = tokio::time::sleep(next_poll_delay), if !idle_watcher_active => {
                     if backoff.is_circuit_open() {
                         let delay = backoff.current_delay();
                         warn!(
@@ -1232,6 +1238,7 @@ impl SyncWorker {
                 trigger = idle_trigger_rx.recv(), if idle_watcher_active => {
                     match trigger {
                         Some(ImapWorkerTrigger::ProviderPush) => {
+                            runtime.record_trigger(SyncTrigger::ProviderPush, Instant::now());
                             if backoff.is_circuit_open() {
                                 debug!(
                                     "Ignoring IMAP provider push while circuit is open for account {}",
@@ -1260,6 +1267,7 @@ impl SyncWorker {
                 trigger = recv_sync_trigger(&mut trigger_rx) => {
                     match trigger {
                         Some(trigger) => {
+                            runtime.record_trigger(trigger, Instant::now());
                             if !trigger.should_sync_now() {
                                 continue;
                             }
@@ -1421,5 +1429,29 @@ mod tests {
     #[test]
     fn imap_deletion_diff_skips_empty_local_state() {
         assert!(!should_run_imap_deletion_diff(10, 0));
+    }
+
+    #[test]
+    fn imap_polling_fallback_uses_realtime_policy_delays() {
+        let mut config = SyncConfig::default();
+        config.poll_interval_secs = 60;
+        let policy = imap_poll_policy(&config);
+
+        assert_eq!(
+            policy.next_delay(crate::realtime_policy::RealtimeContext {
+                app_foreground: true,
+                recent_activity: true,
+                consecutive_failures: 0,
+            }),
+            std::time::Duration::from_secs(60)
+        );
+        assert_eq!(
+            policy.next_delay(crate::realtime_policy::RealtimeContext {
+                app_foreground: false,
+                recent_activity: false,
+                consecutive_failures: 0,
+            }),
+            std::time::Duration::from_secs(120)
+        );
     }
 }

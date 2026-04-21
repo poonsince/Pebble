@@ -44,8 +44,8 @@ import { useTranslation } from "react-i18next";
 import i18next from "i18next";
 import { WifiOff } from "lucide-react";
 import { listen } from "@tauri-apps/api/event";
-import { invoke } from "@tauri-apps/api/core";
 import { useQueryClient } from "@tanstack/react-query";
+import { setNotificationsEnabled as setBackendNotificationsEnabled } from "@/lib/api";
 
 export default function Layout() {
   const activeView = useUIStore((s) => s.activeView);
@@ -77,7 +77,7 @@ export default function Layout() {
 
   // Keep the Rust notification gate aligned with the single frontend preference source.
   useEffect(() => {
-    invoke("set_notifications_enabled", { enabled: notificationsEnabled })
+    setBackendNotificationsEnabled(notificationsEnabled)
       .catch((err) => console.warn("Failed to sync notification preference to backend", err));
   }, [notificationsEnabled]);
 

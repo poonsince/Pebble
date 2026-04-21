@@ -8,7 +8,7 @@ export type SettingsTab = "accounts" | "general" | "appearance" | "privacy" | "r
 export type Theme = "light" | "dark" | "system";
 export type Language = "en" | "zh";
 export type NetworkStatus = "online" | "offline";
-export type RealtimeMode = "realtime" | "polling" | "backoff" | "offline" | "auth_required" | "error";
+export type RealtimeMode = "realtime" | "polling" | "manual" | "backoff" | "offline" | "auth_required" | "error";
 export type RealtimePreference = "realtime" | "balanced" | "battery" | "manual";
 
 export interface RealtimeStatus {

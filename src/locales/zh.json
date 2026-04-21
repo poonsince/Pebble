@@ -260,6 +260,7 @@
     "retrying": "正在重试...",
     "realtimeConnected": "实时连接",
     "realtimePolling": "轮询中",
+    "realtimeManual": "仅手动",
     "realtimeBackoff": "正在重试",
     "realtimeAuthRequired": "需要重新连接",
     "realtimeError": "实时同步错误",

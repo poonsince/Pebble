@@ -260,6 +260,7 @@
     "retrying": "Retrying...",
     "realtimeConnected": "Realtime connected",
     "realtimePolling": "Polling",
+    "realtimeManual": "Manual only",
     "realtimeBackoff": "Retrying",
     "realtimeAuthRequired": "Reconnect required",
     "realtimeError": "Realtime error",

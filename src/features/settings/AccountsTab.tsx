@@ -350,6 +350,8 @@ function getAccountRealtimeStatusText(
       return t("status.realtimeConnected", "Realtime connected");
     case "polling":
       return t("status.realtimePolling", "Polling");
+    case "manual":
+      return t("status.realtimeManual", "Manual only");
     case "backoff":
       return t("status.realtimeBackoff", "Retrying");
     case "auth_required":
