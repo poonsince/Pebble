@@ -99,9 +99,8 @@ To use Gmail or Outlook, you need OAuth credentials:
 
 | Variable | Description |
 |----------|-------------|
-| `GOOGLE_CLIENT_ID` | Google OAuth 2.0 Client ID (Desktop app type, no secret needed — uses PKCE) |
-| `MICROSOFT_CLIENT_ID` | Microsoft Azure App Client ID |
-| `MICROSOFT_CLIENT_SECRET` | Microsoft Azure App Client Secret |
+| `GOOGLE_CLIENT_ID` | Google OAuth 2.0 Client ID (Desktop app type, no secret needed; uses PKCE) |
+| `MICROSOFT_CLIENT_ID` | Microsoft Azure public/native app Client ID (no secret needed; uses PKCE) |
 
 See `.env.example` for the full template.
 
@@ -112,7 +111,7 @@ See `.env.example` for the full template.
 pnpm build
 ```
 
-Build artifacts will be in `src-tauri/target/release/bundle/`.
+Build artifacts will be under `target/release/` and `target/release/bundle/`.
 
 ## Project Structure
 
