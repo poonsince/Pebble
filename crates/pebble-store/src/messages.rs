@@ -1077,7 +1077,119 @@ impl Store {
         })
     }
 
-    /// Get all (message_id_header → thread_id) mappings for an account.
+    /// List thread summaries across multiple folders, ordered by most recent
+    /// selected message. Messages that are present in more than one selected
+    /// folder are counted once.
+    pub fn list_threads_by_folders(
+        &self,
+        folder_ids: &[String],
+        limit: u32,
+        offset: u32,
+    ) -> Result<Vec<pebble_core::ThreadSummary>> {
+        if folder_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        if folder_ids.len() == 1 {
+            return self.list_threads_by_folder(&folder_ids[0], limit, offset);
+        }
+
+        self.with_read(|conn| {
+            let placeholders: Vec<String> =
+                (1..=folder_ids.len()).map(|i| format!("?{}", i)).collect();
+            let sql = format!(
+                "WITH selected_messages AS (
+                        SELECT DISTINCT
+                               m.id,
+                               m.thread_id,
+                               m.subject,
+                               m.snippet,
+                               m.date,
+                               m.is_read,
+                               m.is_starred,
+                               m.from_address,
+                               m.has_attachments
+                        FROM messages m
+                        JOIN message_folders mf ON m.id = mf.message_id
+                        WHERE mf.folder_id IN ({})
+                          AND m.is_deleted = 0
+                          AND m.thread_id IS NOT NULL
+                     ),
+                     thread_participants AS (
+                        SELECT thread_id,
+                               GROUP_CONCAT(from_address, '||') AS participants
+                        FROM (
+                            SELECT DISTINCT thread_id, from_address
+                            FROM selected_messages
+                        )
+                        GROUP BY thread_id
+                     ),
+                     max_date AS (
+                        SELECT thread_id, MAX(date) AS md
+                        FROM selected_messages
+                        GROUP BY thread_id
+                     )
+                     SELECT
+                        sm.thread_id,
+                        MAX(sm.subject) AS subject,
+                        MAX(CASE WHEN sm.date = max_date.md THEN sm.snippet ELSE '' END) AS snippet,
+                        MAX(sm.date) AS last_date,
+                        COUNT(*) AS message_count,
+                        SUM(CASE WHEN sm.is_read = 0 THEN 1 ELSE 0 END) AS unread_count,
+                        MAX(sm.is_starred) AS is_starred,
+                        COALESCE(tp.participants, '') AS participants,
+                        MAX(sm.has_attachments) AS has_attachments
+                     FROM selected_messages sm
+                     JOIN max_date ON sm.thread_id = max_date.thread_id
+                     LEFT JOIN thread_participants tp ON sm.thread_id = tp.thread_id
+                     GROUP BY sm.thread_id
+                     ORDER BY last_date DESC
+                     LIMIT ?{} OFFSET ?{}",
+                placeholders.join(", "),
+                folder_ids.len() + 1,
+                folder_ids.len() + 2,
+            );
+            let mut stmt = conn.prepare(&sql)?;
+
+            let mut param_values: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+            for fid in folder_ids {
+                param_values.push(Box::new(fid.clone()));
+            }
+            param_values.push(Box::new(limit));
+            param_values.push(Box::new(offset));
+            let params_ref: Vec<&dyn rusqlite::types::ToSql> =
+                param_values.iter().map(|v| v.as_ref()).collect();
+
+            let rows = stmt.query_map(params_ref.as_slice(), |row| {
+                let participants_str: String = row.get(7)?;
+                let participants: Vec<String> = participants_str
+                    .split("||")
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+                    .collect();
+                let is_starred: i32 = row.get(6)?;
+                let has_attachments: i32 = row.get(8)?;
+                Ok(pebble_core::ThreadSummary {
+                    thread_id: row.get(0)?,
+                    subject: row.get(1)?,
+                    snippet: row.get(2)?,
+                    last_date: row.get(3)?,
+                    message_count: row.get::<_, i64>(4)? as u32,
+                    unread_count: row.get::<_, i64>(5)? as u32,
+                    is_starred: is_starred != 0,
+                    participants,
+                    has_attachments: has_attachments != 0,
+                })
+            })?;
+
+            let mut results = Vec::new();
+            for row in rows {
+                results.push(row?);
+            }
+            Ok(results)
+        })
+    }
+
+    /// Get all message-id to thread-id mappings for an account.
     /// Returns a HashMap for O(1) lookup during thread computation.
     pub fn get_thread_mappings(
         &self,
@@ -1518,5 +1630,41 @@ mod thread_listing_tests {
                 "bob@example.com".to_string()
             ]
         );
+    }
+
+    #[test]
+    fn list_threads_by_folders_counts_messages_once_across_selected_folders() {
+        let store = Store::open_in_memory().unwrap();
+        let (account_id, inbox_id) = seed_account_and_folder(&store);
+        let archive = Folder {
+            id: new_id(),
+            account_id: account_id.clone(),
+            remote_id: "Archive".to_string(),
+            name: "Archive".to_string(),
+            folder_type: FolderType::Folder,
+            role: Some(FolderRole::Archive),
+            parent_id: None,
+            color: None,
+            is_system: true,
+            sort_order: 1,
+        };
+        store.insert_folder(&archive).unwrap();
+
+        let thread_id = new_id();
+        let base = now_timestamp();
+        let m1 = make_msg(&account_id, &thread_id, "alice@example.com", base - 60);
+        let m2 = make_msg(&account_id, &thread_id, "bob@example.com", base);
+        store
+            .insert_message(&m1, &[inbox_id.clone(), archive.id.clone()])
+            .unwrap();
+        store.insert_message(&m2, &[archive.id.clone()]).unwrap();
+
+        let threads = store
+            .list_threads_by_folders(&[inbox_id, archive.id], 50, 0)
+            .expect("list_threads_by_folders should aggregate selected folders");
+
+        assert_eq!(threads.len(), 1);
+        assert_eq!(threads[0].message_count, 2);
+        assert_eq!(threads[0].snippet, format!("snippet-{base}"));
     }
 }

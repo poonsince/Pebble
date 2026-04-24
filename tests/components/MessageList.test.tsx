@@ -46,7 +46,8 @@ vi.mock("@tanstack/react-virtual", () => ({
 }));
 
 vi.mock("../../src/hooks/queries", () => ({
-  useFoldersQuery: () => ({ data: mocks.folders }),
+  useAccountsQuery: () => ({ data: [{ id: "account-1" }] }),
+  useFoldersForAccountsQuery: () => ({ data: mocks.folders }),
 }));
 
 vi.mock("../../src/lib/api", () => ({

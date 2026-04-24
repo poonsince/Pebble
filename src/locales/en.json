@@ -43,7 +43,8 @@
     "navigation": "Sidebar",
     "search": "Search",
     "mailFolders": "Mail folders",
-    "tools": "Tools"
+    "tools": "Tools",
+    "allAccounts": "All accounts"
   },
   "inbox": {
     "searchPlaceholder": "Search messages...",

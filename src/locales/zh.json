@@ -43,7 +43,8 @@
     "navigation": "侧边栏",
     "search": "搜索",
     "mailFolders": "邮件文件夹",
-    "tools": "工具"
+    "tools": "工具",
+    "allAccounts": "全部邮箱"
   },
   "inbox": {
     "searchPlaceholder": "搜索邮件...",

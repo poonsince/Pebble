@@ -61,7 +61,7 @@ vi.mock("../../../src/stores/mail.store", () => ({
 
 vi.mock("../../../src/hooks/queries", () => ({
   useAccountsQuery: () => ({ data: [{ id: "account-1" }] }),
-  useFoldersQuery: () => ({
+  useFoldersForAccountsQuery: () => ({
     data: [{ id: "folder-inbox", role: "inbox" }],
   }),
   useMessagesQuery: () => ({

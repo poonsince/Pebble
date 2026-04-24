@@ -1,5 +1,5 @@
 import { useMailStore } from "@/stores/mail.store";
-import { useAccountsQuery, useMessagesQuery, useThreadsQuery, useFoldersQuery, patchMessagesCache } from "@/hooks/queries";
+import { useAccountsQuery, useMessagesQuery, useThreadsQuery, useFoldersForAccountsQuery, patchMessagesCache } from "@/hooks/queries";
 import { useUIStore } from "@/stores/ui.store";
 import { useToastStore } from "@/stores/toast.store";
 import MessageList from "@/components/MessageList";
@@ -7,7 +7,7 @@ import MessageDetail from "@/components/MessageDetail";
 import ThreadView from "./ThreadView";
 import ThreadItem from "@/components/ThreadItem";
 import SearchBar from "@/components/SearchBar";
-import { useRef, useState, useCallback, useEffect } from "react";
+import { useRef, useState, useCallback, useEffect, useMemo } from "react";
 import ConfirmDialog from "@/components/ConfirmDialog";
 import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
@@ -15,6 +15,7 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import { List, MessageSquare, Mail, Trash2, Inbox, CheckSquare } from "lucide-react";
 import { MessageListSkeleton } from "@/components/Skeleton";
 import { emptyTrash } from "@/lib/api";
+import { folderIdsForSelection, roleForSelection } from "@/lib/folderAggregation";
 import type { ThreadSummary } from "@/lib/api";
 
 const EMPTY_THREADS: ThreadSummary[] = [];
@@ -31,20 +32,20 @@ export default function InboxView() {
   const selectedThreadId = useMailStore((s) => s.selectedThreadId);
   const setSelectedThreadId = useMailStore((s) => s.setSelectedThreadId);
   const { data: accounts = [] } = useAccountsQuery();
-  const { data: folders = [] } = useFoldersQuery(activeAccountId);
+  const folderAccountIds = useMemo(
+    () => activeAccountId ? [activeAccountId] : accounts.map((account) => account.id),
+    [accounts, activeAccountId],
+  );
+  const { data: folders = [] } = useFoldersForAccountsQuery(folderAccountIds);
   const queryClient = useQueryClient();
   const addToast = useToastStore((s) => s.addToast);
   const [showTrashConfirm, setShowTrashConfirm] = useState(false);
 
-  const activeFolder = folders.find((f) => f.id === activeFolderId);
-  const isTrashFolder = activeFolder?.role === "trash";
-
-  // Collect all folder IDs with the same role for merged queries (e.g. spam + virus + ad)
-  const siblingFolderIds = (() => {
-    if (!activeFolder?.role) return undefined;
-    const ids = folders.filter((f) => f.role === activeFolder.role).map((f) => f.id);
-    return ids.length > 1 ? ids : undefined;
-  })();
+  const activeFolderRole = roleForSelection(activeFolderId, folders);
+  const isTrashFolder = activeFolderRole === "trash";
+  const selectedFolderIds = folderIdsForSelection(activeFolderId, folders);
+  const queryFolderId = selectedFolderIds[0] ?? null;
+  const queryFolderIds = selectedFolderIds.length > 1 ? selectedFolderIds : undefined;
 
   const {
     data: messages,
@@ -53,11 +54,14 @@ export default function InboxView() {
     isFetchingNextPage,
     fetchNextPage,
   } = useMessagesQuery(
-    threadView ? null : activeFolderId,
-    threadView ? undefined : siblingFolderIds,
+    threadView ? null : queryFolderId,
+    threadView ? undefined : queryFolderIds,
   );
   const { data: threads = EMPTY_THREADS, isLoading: loadingThreads } = useThreadsQuery(
-    threadView ? activeFolderId : null,
+    threadView ? queryFolderId : null,
+    50,
+    0,
+    threadView ? queryFolderIds : undefined,
   );
   const handleLoadMore = useCallback(() => {
     if (hasNextPage && !isFetchingNextPage) fetchNextPage();
@@ -126,9 +130,10 @@ export default function InboxView() {
                 onCancel={() => setShowTrashConfirm(false)}
                 onConfirm={async () => {
                   setShowTrashConfirm(false);
-                  if (!activeAccountId) return;
                   try {
-                    const count = await emptyTrash(activeAccountId);
+                    const targetAccountIds = activeAccountId ? [activeAccountId] : accounts.map((account) => account.id);
+                    const counts = await Promise.all(targetAccountIds.map((accountId) => emptyTrash(accountId)));
+                    const count = counts.reduce((sum, current) => sum + current, 0);
                     queryClient.invalidateQueries({ queryKey: ["messages"] });
                     addToast({ message: t("messageActions.emptyTrashSuccess", { count }), type: "success" });
                   } catch {
@@ -208,7 +213,7 @@ export default function InboxView() {
               <MessageDetail
                 messageId={selectedMessageId}
                 onBack={() => setSelectedMessage(null)}
-                folderRole={activeFolder?.role}
+                folderRole={activeFolderRole}
               />
             ) : null}
           </div>

@@ -5,10 +5,11 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Inbox, Archive, Trash2, MailOpen, MailCheck, Star, X } from "lucide-react";
 import type { MessageSummary } from "@/lib/api";
 import { getMessageLabelsBatch, batchArchive, batchDelete, batchMarkRead, batchStar } from "@/lib/api";
-import { useFoldersQuery } from "@/hooks/queries";
+import { useAccountsQuery, useFoldersForAccountsQuery } from "@/hooks/queries";
 import { useMailStore } from "@/stores/mail.store";
 import { useToastStore } from "@/stores/toast.store";
 import { useConfirmStore } from "@/stores/confirm.store";
+import { roleForSelection } from "@/lib/folderAggregation";
 import MessageItem from "./MessageItem";
 import { MessageListSkeleton } from "./Skeleton";
 
@@ -47,11 +48,16 @@ export default function MessageList({
   const confirm = useConfirmStore((s) => s.confirm);
   const activeAccountId = useMailStore((s) => s.activeAccountId);
   const activeFolderId = useMailStore((s) => s.activeFolderId);
-  const { data: folders = [] } = useFoldersQuery(activeAccountId);
+  const { data: accounts = [] } = useAccountsQuery();
+  const folderAccountIds = useMemo(
+    () => activeAccountId ? [activeAccountId] : accounts.map((account) => account.id),
+    [accounts, activeAccountId],
+  );
+  const { data: folders = [] } = useFoldersForAccountsQuery(folderAccountIds);
   // Offer spam action only when NOT already viewing the spam folder
-  const activeFolder = folders.find((f) => f.id === activeFolderId);
-  const spamFolder = folders.find((f) => f.role === "spam");
-  const spamFolderId = activeFolder?.role !== "spam" ? spamFolder?.id : undefined;
+  const activeFolderRole = roleForSelection(activeFolderId, folders);
+  const spamFolder = activeAccountId ? folders.find((f) => f.account_id === activeAccountId && f.role === "spam") : undefined;
+  const spamFolderId = activeFolderRole !== "spam" ? spamFolder?.id : undefined;
   const messageIds = useMemo(() => messages.map((m) => m.id), [messages]);
   const messageIdsKey = useMemo(() => messageIds.join(","), [messageIds]);
   const { data: labelsByMessage = {} } = useQuery({
@@ -216,7 +222,7 @@ export default function MessageList({
                   batchSelected={selectedMessageIds.has(message.id)}
                   onToggleBatchSelect={toggleMessageSelection}
                   spamFolderId={spamFolderId}
-                  folderRole={activeFolder?.role}
+                  folderRole={activeFolderRole}
                 />
               </div>
             );

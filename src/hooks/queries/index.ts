@@ -1,5 +1,5 @@
 export { useAccountsQuery, accountsQueryKey } from "./useAccountsQuery";
-export { useFoldersQuery, foldersQueryKey } from "./useFoldersQuery";
+export { useFoldersForAccountsQuery, useFoldersQuery, foldersQueryKey } from "./useFoldersQuery";
 export {
   useMessagesQuery,
   messagesQueryKey,

@@ -399,8 +399,13 @@ export async function testTranslateConnection(config: string): Promise<string> {
 
 // ─── Thread API ──────────────────────────────────────────────────────────────
 
-export async function listThreads(folderId: string, limit: number, offset: number): Promise<ThreadSummary[]> {
-  return invoke<ThreadSummary[]>("list_threads", { folderId, limit, offset });
+export async function listThreads(
+  folderId: string,
+  limit: number,
+  offset: number,
+  folderIds?: string[],
+): Promise<ThreadSummary[]> {
+  return invoke<ThreadSummary[]>("list_threads", { folderId, folderIds, limit, offset });
 }
 
 export async function listThreadMessages(threadId: string): Promise<Message[]> {

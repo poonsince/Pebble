@@ -18,8 +18,13 @@ import { useUIStore } from "../stores/ui.store";
 import { isComposeDirty, useComposeStore } from "../stores/compose.store";
 import { useConfirmStore } from "../stores/confirm.store";
 import { useMailStore } from "../stores/mail.store";
-import { useAccountsQuery, useFoldersQuery } from "../hooks/queries";
-import { useFolderUnreadCounts } from "../hooks/queries/useFolderUnreadCounts";
+import { useAccountsQuery, useFoldersForAccountsQuery } from "../hooks/queries";
+import { useFolderUnreadCountsForAccounts } from "../hooks/queries/useFolderUnreadCounts";
+import {
+  ALL_ACCOUNTS_SELECT_VALUE,
+  buildAllAccountsFolders,
+  unreadCountForFolder,
+} from "../lib/folderAggregation";
 import type { Account, Folder as FolderType } from "../lib/api";
 
 const EMPTY_ACCOUNTS: Account[] = [];
@@ -60,8 +65,13 @@ export default function Sidebar() {
 
   const showUnread = useUIStore((s) => s.showFolderUnreadCount);
   const { data: accounts = EMPTY_ACCOUNTS } = useAccountsQuery();
-  const { data: folders = EMPTY_FOLDERS, isFetched: foldersFetched } = useFoldersQuery(activeAccountId);
-  const { data: unreadCounts = {} } = useFolderUnreadCounts(activeAccountId);
+  const allAccountsMode = accounts.length > 1 && !activeAccountId;
+  const folderAccountIds = useMemo(
+    () => activeAccountId ? [activeAccountId] : accounts.map((account) => account.id),
+    [accounts, activeAccountId],
+  );
+  const { data: folders = EMPTY_FOLDERS, isFetched: foldersFetched } = useFoldersForAccountsQuery(folderAccountIds);
+  const { data: unreadCounts = {} } = useFolderUnreadCountsForAccounts(folderAccountIds);
 
   const ROLE_LABELS: Record<string, string> = {
     inbox: t("sidebar.inbox"),
@@ -73,12 +83,17 @@ export default function Sidebar() {
   };
   const folderLabel = (folder: FolderType) => (folder.role && ROLE_LABELS[folder.role]) || folder.name;
 
-  const hasRealFolders = folders.length > 0;
+  const displayedFolders = useMemo(
+    () => allAccountsMode ? buildAllAccountsFolders(folders) : folders,
+    [allAccountsMode, folders],
+  );
+  const hasRealFolders = displayedFolders.length > 0;
 
   // Deduplicate folders by role, insert archive after sent
   const dedupedFolders = useMemo(() => {
+    if (allAccountsMode) return displayedFolders;
     const seenRoles = new Set<string>();
-    const result = folders.filter((f) => {
+    const result = displayedFolders.filter((f) => {
       if (f.role === "archive") return false; // inserted manually after sent
       if (!f.role) return true;
       if (seenRoles.has(f.role)) return false;
@@ -86,17 +101,18 @@ export default function Sidebar() {
       return true;
     });
     // Insert archive folder after "sent"
-    const archiveFolder = folders.find((f) => f.role === "archive");
+    const archiveFolder = displayedFolders.find((f) => f.role === "archive");
     if (archiveFolder) {
       const sentIdx = result.findIndex((f) => f.role === "sent");
       result.splice(sentIdx >= 0 ? sentIdx + 1 : result.length, 0, archiveFolder);
     }
     return result;
-  }, [folders]);
+  }, [allAccountsMode, displayedFolders]);
 
-  // Auto-select first account
+  // Auto-select the only account. With multiple accounts, null means the
+  // combined "all accounts" mailbox.
   useEffect(() => {
-    if (accounts.length > 0 && !activeAccountId) {
+    if (accounts.length === 1 && !activeAccountId) {
       setActiveAccountId(accounts[0].id);
     }
   }, [accounts, activeAccountId, setActiveAccountId]);
@@ -104,19 +120,17 @@ export default function Sidebar() {
   // Auto-select inbox folder when folders load.
   // If the selected account has no folders, try the next account.
   useEffect(() => {
-    if (folders.length > 0 && !activeFolderId) {
-      const inbox = folders.find((f) => f.role === "inbox");
-      if (inbox) {
-        setActiveFolderId(inbox.id);
-      }
-    } else if (foldersFetched && folders.length === 0 && activeAccountId && accounts.length > 1) {
+    if (displayedFolders.length > 0 && !activeFolderId) {
+      const inbox = displayedFolders.find((f) => f.role === "inbox");
+      setActiveFolderId((inbox ?? displayedFolders[0]).id);
+    } else if (!allAccountsMode && foldersFetched && displayedFolders.length === 0 && activeAccountId && accounts.length > 1) {
       const idx = accounts.findIndex((a) => a.id === activeAccountId);
       const next = accounts[idx + 1] ?? accounts.find((a) => a.id !== activeAccountId);
       if (next) {
         setActiveAccountId(next.id);
       }
     }
-  }, [folders, foldersFetched, activeFolderId, setActiveFolderId, accounts, activeAccountId, setActiveAccountId]);
+  }, [displayedFolders, foldersFetched, activeFolderId, setActiveFolderId, accounts, activeAccountId, setActiveAccountId, allAccountsMode]);
 
   async function confirmDiscardDraft() {
     if (isComposeDirty()) {
@@ -209,9 +223,9 @@ export default function Sidebar() {
         <div style={{ padding: "0 6px 4px" }}>
           <select
             aria-label={t("settings.emailAccounts", "Email Accounts")}
-            value={activeAccountId || ""}
+            value={activeAccountId || ALL_ACCOUNTS_SELECT_VALUE}
             onChange={(e) => {
-              setActiveAccountId(e.target.value);
+              setActiveAccountId(e.target.value === ALL_ACCOUNTS_SELECT_VALUE ? null : e.target.value);
               setActiveFolderId(null);
             }}
             style={{
@@ -225,6 +239,9 @@ export default function Sidebar() {
               cursor: "pointer",
             }}
           >
+            <option value={ALL_ACCOUNTS_SELECT_VALUE}>
+              {t("sidebar.allAccounts", "All accounts")}
+            </option>
             {accounts.map((acc) => (
               <option key={acc.id} value={acc.id}>
                 {acc.email}
@@ -269,7 +286,7 @@ export default function Sidebar() {
                   key={folder.id}
                   icon={folderIcon(folder.role)}
                   label={folderLabel(folder)}
-                  badge={showUnread ? unreadCounts[folder.id] : undefined}
+                  badge={showUnread ? unreadCountForFolder(folder.id, folders, unreadCounts) : undefined}
                   isActive={isActive}
                   collapsed={sidebarCollapsed}
                   style={buttonBase}

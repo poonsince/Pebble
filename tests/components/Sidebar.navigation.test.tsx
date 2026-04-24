@@ -49,7 +49,7 @@ vi.mock("../../src/hooks/queries", () => ({
       },
     ],
   }),
-  useFoldersQuery: () => ({
+  useFoldersForAccountsQuery: () => ({
     data: [
       {
         id: "folder-inbox",
@@ -69,7 +69,7 @@ vi.mock("../../src/hooks/queries", () => ({
 }));
 
 vi.mock("../../src/hooks/queries/useFolderUnreadCounts", () => ({
-  useFolderUnreadCounts: () => ({ data: {} }),
+  useFolderUnreadCountsForAccounts: () => ({ data: {} }),
 }));
 
 describe("Sidebar navigation", () => {
