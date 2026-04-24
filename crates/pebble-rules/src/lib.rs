@@ -1,9 +1,9 @@
-pub mod types;
 pub mod matcher;
+pub mod types;
 
+use matcher::evaluate_conditions;
 use pebble_core::{Message, Rule};
 use types::{RuleAction, RuleConditionSet};
-use matcher::evaluate_conditions;
 
 pub struct RuleEngine {
     rules: Vec<(RuleConditionSet, Vec<RuleAction>)>,
@@ -87,7 +87,13 @@ mod tests {
         }
     }
 
-    fn make_test_rule(name: &str, priority: i32, conditions_json: &str, actions_json: &str, enabled: bool) -> Rule {
+    fn make_test_rule(
+        name: &str,
+        priority: i32,
+        conditions_json: &str,
+        actions_json: &str,
+        enabled: bool,
+    ) -> Rule {
         Rule {
             id: "rule-1".to_string(),
             name: name.to_string(),

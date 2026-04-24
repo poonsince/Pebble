@@ -60,10 +60,7 @@ pub fn compute_flag_diff(
 /// server_uids: all UIDs currently on the server
 ///
 /// Returns message_ids that should be soft-deleted locally.
-pub fn detect_deletions(
-    local_remote_ids: &[(String, String)],
-    server_uids: &[u32],
-) -> Vec<String> {
+pub fn detect_deletions(local_remote_ids: &[(String, String)], server_uids: &[u32]) -> Vec<String> {
     use std::collections::HashSet;
 
     let server_set: HashSet<u32> = server_uids.iter().copied().collect();
@@ -127,7 +124,13 @@ mod tests {
     fn test_flag_diff_grace_period_skips_recent_message() {
         let now = pebble_core::now_timestamp();
         // updated_at = now - 30 seconds (within the 60s grace period)
-        let local = vec![("msg1".to_string(), "100".to_string(), false, false, now - 30)];
+        let local = vec![(
+            "msg1".to_string(),
+            "100".to_string(),
+            false,
+            false,
+            now - 30,
+        )];
         let remote = vec![(100, true, false)];
         let diff = compute_flag_diff(&local, &remote);
         // Should be skipped due to grace period
@@ -138,7 +141,13 @@ mod tests {
     fn test_flag_diff_grace_period_allows_old_message() {
         let now = pebble_core::now_timestamp();
         // updated_at = now - 120 seconds (outside the 60s grace period)
-        let local = vec![("msg1".to_string(), "100".to_string(), false, false, now - 120)];
+        let local = vec![(
+            "msg1".to_string(),
+            "100".to_string(),
+            false,
+            false,
+            now - 120,
+        )];
         let remote = vec![(100, true, false)];
         let diff = compute_flag_diff(&local, &remote);
         // Should NOT be skipped — old enough to reconcile

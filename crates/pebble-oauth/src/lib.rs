@@ -63,9 +63,11 @@ impl OAuthManager {
             .map_err(|e| OAuthError::Config(format!("Invalid auth URL: {}", e)))?;
         let token_url = TokenUrl::new(self.config.token_url.clone())
             .map_err(|e| OAuthError::Config(format!("Invalid token URL: {}", e)))?;
-        let redirect_url =
-            RedirectUrl::new(format!("http://127.0.0.1:{}/callback", self.config.redirect_port))
-                .map_err(|e| OAuthError::Config(format!("Invalid redirect URL: {}", e)))?;
+        let redirect_url = RedirectUrl::new(format!(
+            "http://127.0.0.1:{}/callback",
+            self.config.redirect_port
+        ))
+        .map_err(|e| OAuthError::Config(format!("Invalid redirect URL: {}", e)))?;
         Ok(ParsedUrls {
             auth_url,
             token_url,
@@ -162,7 +164,9 @@ impl OAuthManager {
     }
 
     /// Bind the redirect listener. Returns the bound listener with the actual port.
-    pub async fn bind_redirect_listener(&self) -> Result<redirect::BoundRedirectListener, OAuthError> {
+    pub async fn bind_redirect_listener(
+        &self,
+    ) -> Result<redirect::BoundRedirectListener, OAuthError> {
         redirect::bind_redirect_listener(self.config.redirect_port).await
     }
 

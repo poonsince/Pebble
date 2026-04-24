@@ -279,7 +279,10 @@ impl OutlookProvider {
     }
 
     pub fn token(&self) -> String {
-        self.access_token.read().unwrap_or_else(|e| e.into_inner()).clone()
+        self.access_token
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
     }
 
     async fn get(&self, url: &str) -> Result<reqwest::Response> {
@@ -509,7 +512,11 @@ impl OutlookProvider {
 #[async_trait]
 impl MailTransport for OutlookProvider {
     async fn authenticate(&mut self, credentials: &AuthCredentials) -> Result<()> {
-        if let Some(token) = credentials.data.get("access_token").and_then(|v| v.as_str()) {
+        if let Some(token) = credentials
+            .data
+            .get("access_token")
+            .and_then(|v| v.as_str())
+        {
             self.set_access_token(token.to_string());
         }
         // Verify by making a profile request
@@ -525,7 +532,8 @@ impl MailTransport for OutlookProvider {
 
     async fn fetch_messages(&self, query: &FetchQuery) -> Result<FetchResult> {
         let limit = query.limit.unwrap_or(50);
-        self.fetch_messages_page(&query.folder_id, limit, None).await
+        self.fetch_messages_page(&query.folder_id, limit, None)
+            .await
     }
 
     async fn send_message(&self, message: &OutgoingMessage) -> Result<()> {
@@ -714,7 +722,10 @@ impl OutlookProvider {
     /// Fetch all file attachments for a message via Graph API.
     /// Returns parsed `AttachmentData` suitable for `persist_message_attachments`.
     /// Inline and non-file attachments (itemAttachment, referenceAttachment) are skipped.
-    async fn list_graph_attachment_items(&self, remote_id: &str) -> Result<Vec<GraphAttachmentItem>> {
+    async fn list_graph_attachment_items(
+        &self,
+        remote_id: &str,
+    ) -> Result<Vec<GraphAttachmentItem>> {
         let url = format!("{GRAPH_API_BASE}/messages/{remote_id}/attachments");
         let resp = self.get(&url).await?;
         if !resp.status().is_success() {
@@ -742,7 +753,10 @@ impl OutlookProvider {
                 if !is_graph_file_attachment(&item) {
                     continue;
                 }
-                let url = format!("{GRAPH_API_BASE}/messages/{draft_id}/attachments/{}", item.id);
+                let url = format!(
+                    "{GRAPH_API_BASE}/messages/{draft_id}/attachments/{}",
+                    item.id
+                );
                 let resp = self.delete(&url).await?;
                 if !resp.status().is_success() {
                     let status = resp.status();
@@ -934,9 +948,7 @@ impl DraftProvider for OutlookProvider {
 
     async fn list_drafts(&self) -> Result<Vec<DraftMessage>> {
         let select = "id,subject,body,toRecipients,ccRecipients,isDraft";
-        let url = format!(
-            "{GRAPH_API_BASE}/mailFolders/Drafts/messages?$select={select}"
-        );
+        let url = format!("{GRAPH_API_BASE}/mailFolders/Drafts/messages?$select={select}");
         let resp = self.get(&url).await?;
         if !resp.status().is_success() {
             let status = resp.status();
@@ -950,11 +962,7 @@ impl DraftProvider for OutlookProvider {
             .await
             .map_err(|e| PebbleError::Network(format!("Failed to parse drafts list: {e}")))?;
 
-        Ok(list
-            .value
-            .iter()
-            .map(graph_message_to_draft)
-            .collect())
+        Ok(list.value.iter().map(graph_message_to_draft).collect())
     }
 }
 
@@ -1206,8 +1214,7 @@ fn parse_graph_datetime(s: &str) -> Option<i64> {
     // Calculate days since Unix epoch using a well-known algorithm.
     let m = if month <= 2 { month + 9 } else { month - 3 };
     let y = if month <= 2 { year - 1 } else { year };
-    let days = 365 * y + y / 4 - y / 100 + y / 400 + (m * 306 + 5) / 10 + day - 1
-        - 719468; // days from 0000-03-01 to 1970-01-01
+    let days = 365 * y + y / 4 - y / 100 + y / 400 + (m * 306 + 5) / 10 + day - 1 - 719468; // days from 0000-03-01 to 1970-01-01
     Some(days * 86400 + hour * 3600 + min * 60 + sec)
 }
 
@@ -1226,10 +1233,7 @@ mod tests {
 
     #[test]
     fn test_well_known_name_to_role_sent() {
-        assert_eq!(
-            well_known_name_to_role("sentitems"),
-            Some(FolderRole::Sent)
-        );
+        assert_eq!(well_known_name_to_role("sentitems"), Some(FolderRole::Sent));
     }
 
     #[test]
@@ -1266,14 +1270,8 @@ mod tests {
     #[test]
     fn test_well_known_name_to_role_case_insensitive() {
         assert_eq!(well_known_name_to_role("Inbox"), Some(FolderRole::Inbox));
-        assert_eq!(
-            well_known_name_to_role("SentItems"),
-            Some(FolderRole::Sent)
-        );
-        assert_eq!(
-            well_known_name_to_role("JunkEmail"),
-            Some(FolderRole::Spam)
-        );
+        assert_eq!(well_known_name_to_role("SentItems"), Some(FolderRole::Sent));
+        assert_eq!(well_known_name_to_role("JunkEmail"), Some(FolderRole::Spam));
     }
 
     #[test]

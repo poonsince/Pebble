@@ -87,4 +87,32 @@ describe("useMessageLoader", () => {
     expect(getRenderedHtml).toHaveBeenCalledWith("message-1", "LoadOnce");
     expect(getMessageWithHtml).toHaveBeenCalledOnce();
   });
+
+  it("exposes message load failures instead of collapsing them into a missing message", async () => {
+    vi.mocked(getMessageWithHtml).mockRejectedValue(new Error("IPC failed"));
+
+    const { result } = renderHook(() => useMessageLoader("message-1", "Strict"));
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    expect(result.current.message).toBeNull();
+    expect(result.current.error).toBe("IPC failed");
+  });
+
+  it("exposes privacy re-render failures without clearing the loaded message", async () => {
+    vi.mocked(getMessageWithHtml).mockResolvedValue([makeMessage(), makeRendered()]);
+    vi.mocked(getRenderedHtml).mockRejectedValue(new Error("render failed"));
+
+    const { result, rerender } = renderHook(
+      ({ privacyMode }) => useMessageLoader("message-1", privacyMode),
+      { initialProps: { privacyMode: "Strict" as const } },
+    );
+
+    await waitFor(() => expect(result.current.message?.id).toBe("message-1"));
+
+    rerender({ privacyMode: "LoadOnce" as const });
+
+    await waitFor(() => expect(result.current.error).toBe("render failed"));
+    expect(result.current.message?.id).toBe("message-1");
+  });
 });

@@ -1,9 +1,12 @@
+use crate::Store;
 use pebble_core::{PebbleError, Result, TranslateConfig};
 use rusqlite::params;
-use crate::Store;
 
 impl Store {
-    pub(crate) fn save_translate_config_with_conn(conn: &rusqlite::Connection, config: &TranslateConfig) -> Result<()> {
+    pub(crate) fn save_translate_config_with_conn(
+        conn: &rusqlite::Connection,
+        config: &TranslateConfig,
+    ) -> Result<()> {
         conn.execute(
             "INSERT INTO translate_config (id, provider_type, config, is_enabled, created_at, updated_at)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6)

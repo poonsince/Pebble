@@ -8,8 +8,6 @@ pub async fn set_notifications_enabled(
     state: State<'_, AppState>,
     enabled: bool,
 ) -> std::result::Result<(), PebbleError> {
-    state
-        .notifications_enabled
-        .store(enabled, Ordering::SeqCst);
+    state.notifications_enabled.store(enabled, Ordering::SeqCst);
     Ok(())
 }

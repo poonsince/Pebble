@@ -100,12 +100,8 @@ pub trait FolderProvider: Send + Sync {
 #[async_trait]
 pub trait LabelProvider: Send + Sync {
     async fn list_labels(&self) -> Result<Vec<Folder>>;
-    async fn modify_labels(
-        &self,
-        remote_id: &str,
-        add: &[String],
-        remove: &[String],
-    ) -> Result<()>;
+    async fn modify_labels(&self, remote_id: &str, add: &[String], remove: &[String])
+        -> Result<()>;
 }
 
 #[async_trait]

@@ -1,5 +1,5 @@
 use crate::state::AppState;
-use pebble_core::{KanbanCard, KanbanColumn, PebbleError, now_timestamp};
+use pebble_core::{now_timestamp, KanbanCard, KanbanColumn, PebbleError};
 use tauri::State;
 
 #[tauri::command]

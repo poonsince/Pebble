@@ -66,25 +66,23 @@ impl Store {
     /// Get all labels for a message.
     pub fn get_message_labels(&self, message_id: &str) -> Result<Vec<Label>> {
         self.with_read(|conn| {
-            let mut stmt = conn
-                .prepare(
-                    "SELECT l.id, l.name, l.color, l.is_system, l.rule_id
+            let mut stmt = conn.prepare(
+                "SELECT l.id, l.name, l.color, l.is_system, l.rule_id
                      FROM labels l
                      INNER JOIN message_labels ml ON ml.label_id = l.id
                      WHERE ml.message_id = ?1
                      ORDER BY l.name",
-                )?;
-            let rows = stmt
-                .query_map(rusqlite::params![message_id], |row| {
-                    let is_system: i32 = row.get(3)?;
-                    Ok(Label {
-                        id: row.get(0)?,
-                        name: row.get(1)?,
-                        color: row.get(2)?,
-                        is_system: is_system != 0,
-                        rule_id: row.get(4)?,
-                    })
-                })?;
+            )?;
+            let rows = stmt.query_map(rusqlite::params![message_id], |row| {
+                let is_system: i32 = row.get(3)?;
+                Ok(Label {
+                    id: row.get(0)?,
+                    name: row.get(1)?,
+                    color: row.get(2)?,
+                    is_system: is_system != 0,
+                    rule_id: row.get(4)?,
+                })
+            })?;
             let mut labels = Vec::new();
             for row in rows {
                 labels.push(row?);
@@ -94,13 +92,17 @@ impl Store {
     }
 
     /// Get labels for multiple messages in one query.
-    pub fn get_message_labels_batch(&self, message_ids: &[String]) -> Result<HashMap<String, Vec<Label>>> {
+    pub fn get_message_labels_batch(
+        &self,
+        message_ids: &[String],
+    ) -> Result<HashMap<String, Vec<Label>>> {
         if message_ids.is_empty() {
             return Ok(HashMap::new());
         }
 
         self.with_read(|conn| {
-            let placeholders: Vec<String> = (1..=message_ids.len()).map(|i| format!("?{i}")).collect();
+            let placeholders: Vec<String> =
+                (1..=message_ids.len()).map(|i| format!("?{i}")).collect();
             let sql = format!(
                 "SELECT ml.message_id, l.id, l.name, l.color, l.is_system, l.rule_id
                  FROM message_labels ml
@@ -109,8 +111,7 @@ impl Store {
                  ORDER BY ml.message_id, l.name",
                 placeholders.join(", ")
             );
-            let mut stmt = conn
-                .prepare(&sql)?;
+            let mut stmt = conn.prepare(&sql)?;
 
             let mut param_values: Vec<Box<dyn rusqlite::types::ToSql>> =
                 Vec::with_capacity(message_ids.len());
@@ -120,20 +121,19 @@ impl Store {
             let params: Vec<&dyn rusqlite::types::ToSql> =
                 param_values.iter().map(|v| v.as_ref()).collect();
 
-            let rows = stmt
-                .query_map(params.as_slice(), |row| {
-                    let is_system: i32 = row.get(4)?;
-                    Ok((
-                        row.get::<_, String>(0)?,
-                        Label {
-                            id: row.get(1)?,
-                            name: row.get(2)?,
-                            color: row.get(3)?,
-                            is_system: is_system != 0,
-                            rule_id: row.get(5)?,
-                        },
-                    ))
-                })?;
+            let rows = stmt.query_map(params.as_slice(), |row| {
+                let is_system: i32 = row.get(4)?;
+                Ok((
+                    row.get::<_, String>(0)?,
+                    Label {
+                        id: row.get(1)?,
+                        name: row.get(2)?,
+                        color: row.get(3)?,
+                        is_system: is_system != 0,
+                        rule_id: row.get(5)?,
+                    },
+                ))
+            })?;
 
             let mut result: HashMap<String, Vec<Label>> = HashMap::new();
             for message_id in message_ids {
@@ -152,17 +152,16 @@ impl Store {
         self.with_read(|conn| {
             let mut stmt = conn
                 .prepare("SELECT id, name, color, is_system, rule_id FROM labels ORDER BY name")?;
-            let rows = stmt
-                .query_map([], |row| {
-                    let is_system: i32 = row.get(3)?;
-                    Ok(Label {
-                        id: row.get(0)?,
-                        name: row.get(1)?,
-                        color: row.get(2)?,
-                        is_system: is_system != 0,
-                        rule_id: row.get(4)?,
-                    })
-                })?;
+            let rows = stmt.query_map([], |row| {
+                let is_system: i32 = row.get(3)?;
+                Ok(Label {
+                    id: row.get(0)?,
+                    name: row.get(1)?,
+                    color: row.get(2)?,
+                    is_system: is_system != 0,
+                    rule_id: row.get(4)?,
+                })
+            })?;
             let mut labels = Vec::new();
             for row in rows {
                 labels.push(row?);

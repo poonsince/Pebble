@@ -1,6 +1,6 @@
-use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::sync::mpsc::Receiver;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use pebble_store::Store;
@@ -39,9 +39,8 @@ pub async fn run_snooze_watcher(
 
         // Run SQLite operations in spawn_blocking to avoid blocking the Tokio runtime
         let store_clone = store.clone();
-        let due_result = tokio::task::spawn_blocking(move || {
-            store_clone.get_due_snoozed(now)
-        }).await;
+        let due_result =
+            tokio::task::spawn_blocking(move || store_clone.get_due_snoozed(now)).await;
 
         match due_result {
             Ok(Ok(due)) => {
@@ -49,16 +48,23 @@ pub async fn run_snooze_watcher(
                     debug!("Unsnoozing message {}", snoozed.message_id);
                     let store_clone = store.clone();
                     let msg_id = snoozed.message_id.clone();
-                    if let Err(e) = tokio::task::spawn_blocking(move || {
-                        store_clone.unsnooze_message(&msg_id)
-                    }).await.unwrap_or_else(|e| Err(pebble_core::PebbleError::Internal(e.to_string()))) {
+                    if let Err(e) =
+                        tokio::task::spawn_blocking(move || store_clone.unsnooze_message(&msg_id))
+                            .await
+                            .unwrap_or_else(|e| {
+                                Err(pebble_core::PebbleError::Internal(e.to_string()))
+                            })
+                    {
                         error!("Failed to unsnooze message {}: {e}", snoozed.message_id);
                         continue;
                     }
-                    let _ = app_handle.emit(events::MAIL_UNSNOOZED, serde_json::json!({
-                        "message_id": snoozed.message_id,
-                        "return_to": snoozed.return_to,
-                    }));
+                    let _ = app_handle.emit(
+                        events::MAIL_UNSNOOZED,
+                        serde_json::json!({
+                            "message_id": snoozed.message_id,
+                            "return_to": snoozed.return_to,
+                        }),
+                    );
 
                     // Send OS notification if enabled
                     let should_notify = app_handle
@@ -70,7 +76,9 @@ pub async fn run_snooze_watcher(
                         let msg_id = snoozed.message_id.clone();
                         let body = match tokio::task::spawn_blocking(move || {
                             store_clone.get_message(&msg_id)
-                        }).await {
+                        })
+                        .await
+                        {
                             Ok(Ok(Some(msg))) => {
                                 if msg.from_name.is_empty() {
                                     msg.subject.clone()
@@ -97,7 +105,9 @@ pub async fn run_snooze_watcher(
             let store_clone = store.clone();
             match tokio::task::spawn_blocking(move || {
                 store_clone.purge_old_tombstones(TOMBSTONE_MAX_AGE_SECS)
-            }).await {
+            })
+            .await
+            {
                 Ok(Ok(count)) if count > 0 => info!("Purged {} old tombstone messages", count),
                 Ok(Ok(_)) => {}
                 Ok(Err(e)) => warn!("Tombstone purge error: {e}"),

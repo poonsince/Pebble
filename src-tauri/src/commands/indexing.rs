@@ -294,17 +294,19 @@ pub async fn index_new_messages(
         };
 
         if let Some(ref app) = app {
-            let _ = app.emit(
-                events::MAIL_NEW,
-                new_mail_event_payload(&stored),
-            );
+            let _ = app.emit(events::MAIL_NEW, new_mail_event_payload(&stored));
             maybe_send_new_mail_notification(app, store, &stored);
         }
 
         if let Some(ref engine) = engine {
             let actions = engine.evaluate(&stored.message);
             for action in actions {
-                if let Err(e) = apply_rule_action(store, &stored.message.account_id, &stored.message.id, &action) {
+                if let Err(e) = apply_rule_action(
+                    store,
+                    &stored.message.account_id,
+                    &stored.message.id,
+                    &action,
+                ) {
                     warn!("Rule action failed for message {}: {e}", stored.message.id);
                 }
             }
@@ -314,7 +316,10 @@ pub async fn index_new_messages(
         let latest_message = match store.get_message(&message_id) {
             Ok(message) => message,
             Err(e) => {
-                warn!("Failed to reload message {} before indexing: {}", message_id, e);
+                warn!(
+                    "Failed to reload message {} before indexing: {}",
+                    message_id, e
+                );
                 continue;
             }
         };
@@ -324,14 +329,20 @@ pub async fn index_new_messages(
                 let folder_ids = match store.get_message_folder_ids(&message_id) {
                     Ok(folder_ids) => folder_ids,
                     Err(e) => {
-                        warn!("Failed to load folders for indexed message {}: {}", message_id, e);
+                        warn!(
+                            "Failed to load folders for indexed message {}: {}",
+                            message_id, e
+                        );
                         continue;
                     }
                 };
 
                 if folder_ids.is_empty() {
                     if let Err(e) = search.remove_message(&message_id) {
-                        warn!("Failed to remove folderless search document {}: {}", message_id, e);
+                        warn!(
+                            "Failed to remove folderless search document {}: {}",
+                            message_id, e
+                        );
                         continue;
                     }
                 } else if let Err(e) = search.index_message(&message, &folder_ids) {
@@ -341,7 +352,10 @@ pub async fn index_new_messages(
             }
             Some(_) | None => {
                 if let Err(e) = search.remove_message(&message_id) {
-                    warn!("Failed to remove stale search document {}: {}", message_id, e);
+                    warn!(
+                        "Failed to remove stale search document {}: {}",
+                        message_id, e
+                    );
                     continue;
                 }
             }
@@ -386,12 +400,20 @@ fn apply_rule_action(
                 info!("Rule: queued remote archive for message {}", message_id);
                 return Ok(());
             }
-            if let Some(archive_folder) = store.find_folder_by_role(account_id, pebble_core::FolderRole::Archive)? {
+            if let Some(archive_folder) =
+                store.find_folder_by_role(account_id, pebble_core::FolderRole::Archive)?
+            {
                 store.move_message_to_folder(message_id, &archive_folder.id)?;
-                info!("Rule: archived message {} to folder {}", message_id, archive_folder.name);
+                info!(
+                    "Rule: archived message {} to folder {}",
+                    message_id, archive_folder.name
+                );
             } else {
                 store.soft_delete_message(message_id)?;
-                info!("Rule: archived (soft-deleted) message {} (no archive folder)", message_id);
+                info!(
+                    "Rule: archived (soft-deleted) message {} (no archive folder)",
+                    message_id
+                );
             }
         }
         RuleAction::AddLabel(label) => {
@@ -408,9 +430,15 @@ fn apply_rule_action(
             }
             if let Some(target_folder) = store.find_folder_by_name(account_id, folder_name)? {
                 store.move_message_to_folder(message_id, &target_folder.id)?;
-                info!("Rule: moved message {} to folder '{}'", message_id, target_folder.name);
+                info!(
+                    "Rule: moved message {} to folder '{}'",
+                    message_id, target_folder.name
+                );
             } else {
-                warn!("Rule: target folder '{}' not found for account {}", folder_name, account_id);
+                warn!(
+                    "Rule: target folder '{}' not found for account {}",
+                    folder_name, account_id
+                );
             }
         }
         RuleAction::SetKanbanColumn(column) => {
@@ -423,7 +451,10 @@ fn apply_rule_action(
                 updated_at: now,
             };
             store.upsert_kanban_card(&card)?;
-            info!("Rule: added message {} to kanban column {:?}", message_id, column);
+            info!(
+                "Rule: added message {} to kanban column {:?}",
+                message_id, column
+            );
         }
     }
     Ok(())

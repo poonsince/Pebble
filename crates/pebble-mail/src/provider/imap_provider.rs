@@ -1,6 +1,6 @@
 use async_trait::async_trait;
-use pebble_core::{Folder, PebbleError, ProviderCapabilities, Result};
 use pebble_core::traits::*;
+use pebble_core::{Folder, PebbleError, ProviderCapabilities, Result};
 
 use crate::imap::ImapProvider;
 

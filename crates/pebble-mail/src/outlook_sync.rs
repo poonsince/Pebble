@@ -11,10 +11,13 @@ use tokio::sync::{mpsc, watch};
 use tracing::{info, warn};
 
 use crate::backoff::SyncBackoff;
-use crate::provider::outlook::{OutlookDeltaPage, OutlookProvider};
 use crate::gmail_sync::TokenRefresher;
+use crate::provider::outlook::{OutlookDeltaPage, OutlookProvider};
 use crate::realtime_policy::{RealtimePollPolicy, RealtimeRuntimeState, SyncTrigger};
-use crate::sync::{StoredMessage, SyncConfig, SyncError, SyncWorkerBase, persist_message_attachments_async, recv_sync_trigger};
+use crate::sync::{
+    persist_message_attachments_async, recv_sync_trigger, StoredMessage, SyncConfig, SyncError,
+    SyncWorkerBase,
+};
 use crate::thread::compute_thread_id;
 
 struct OutlookDeltaBatch {
@@ -133,7 +136,12 @@ fn parse_outlook_delta_cursor(folder_remote_id: &str, state: Option<&str>) -> Op
     let key = outlook_delta_cursor_key(folder_remote_id);
     serde_json::from_str::<serde_json::Value>(state)
         .ok()
-        .and_then(|value| value.get(&key).and_then(|cursor| cursor.as_str()).map(str::to_string))
+        .and_then(|value| {
+            value
+                .get(&key)
+                .and_then(|cursor| cursor.as_str())
+                .map(str::to_string)
+        })
 }
 
 fn serialize_outlook_delta_cursor(folder_remote_id: &str, delta_link: &str) -> String {
@@ -242,14 +250,24 @@ impl OutlookSyncWorker {
         self
     }
 
-    pub fn with_token_refresher(mut self, refresher: TokenRefresher, expires_at: Option<i64>) -> Self {
+    pub fn with_token_refresher(
+        mut self,
+        refresher: TokenRefresher,
+        expires_at: Option<i64>,
+    ) -> Self {
         self.token_refresher = Some(Arc::new(refresher));
-        *self.token_expires_at.lock().unwrap_or_else(|e| e.into_inner()) = expires_at;
+        *self
+            .token_expires_at
+            .lock()
+            .unwrap_or_else(|e| e.into_inner()) = expires_at;
         self
     }
 
     pub fn with_token_expires_at(self, expires_at: Option<i64>) -> Self {
-        *self.token_expires_at.lock().unwrap_or_else(|e| e.into_inner()) = expires_at;
+        *self
+            .token_expires_at
+            .lock()
+            .unwrap_or_else(|e| e.into_inner()) = expires_at;
         self
     }
 
@@ -257,7 +275,10 @@ impl OutlookSyncWorker {
     async fn ensure_valid_token(&self) -> Result<()> {
         let now = now_timestamp();
         let needs_refresh = {
-            let expires = self.token_expires_at.lock().unwrap_or_else(|e| e.into_inner());
+            let expires = self
+                .token_expires_at
+                .lock()
+                .unwrap_or_else(|e| e.into_inner());
             match *expires {
                 Some(exp) => now >= exp - 60,
                 None => false,
@@ -269,14 +290,25 @@ impl OutlookSyncWorker {
                 match refresher().await {
                     Ok((new_token, new_expires_at)) => {
                         self.provider.set_access_token(new_token);
-                        let mut expires = self.token_expires_at.lock().unwrap_or_else(|e| e.into_inner());
+                        let mut expires = self
+                            .token_expires_at
+                            .lock()
+                            .unwrap_or_else(|e| e.into_inner());
                         *expires = new_expires_at.or(Some(now + 3600));
-                        info!("Outlook OAuth token refreshed for account {}", self.base.account_id);
+                        info!(
+                            "Outlook OAuth token refreshed for account {}",
+                            self.base.account_id
+                        );
                     }
                     Err(e) => {
                         warn!("Failed to refresh Outlook OAuth token: {}", e);
-                        self.base.emit_error("token_refresh", &format!("Outlook token refresh failed: {e}"));
-                        return Err(PebbleError::Auth(format!("Outlook token refresh failed: {e}")));
+                        self.base.emit_error(
+                            "token_refresh",
+                            &format!("Outlook token refresh failed: {e}"),
+                        );
+                        return Err(PebbleError::Auth(format!(
+                            "Outlook token refresh failed: {e}"
+                        )));
                     }
                 }
             }
@@ -284,10 +316,16 @@ impl OutlookSyncWorker {
         Ok(())
     }
 
-    async fn persist_folder_messages(&self, folder: &Folder, messages: Vec<Message>, notify_new: bool) -> u32 {
+    async fn persist_folder_messages(
+        &self,
+        folder: &Folder,
+        messages: Vec<Message>,
+        notify_new: bool,
+    ) -> u32 {
         let remote_ids: Vec<String> = messages.iter().map(|m| m.remote_id.clone()).collect();
         let existing = self
-            .base.store
+            .base
+            .store
             .get_existing_remote_ids(&self.base.account_id, &remote_ids)
             .unwrap_or_default();
 
@@ -388,10 +426,14 @@ impl OutlookSyncWorker {
                 let delay = backoff.current_delay();
                 warn!(
                     "Circuit open for Outlook account {} ({} failures), waiting {:?}",
-                    self.base.account_id, backoff.failure_count(), delay
+                    self.base.account_id,
+                    backoff.failure_count(),
+                    delay
                 );
                 loop {
-                    match wait_for_outlook_delay(delay, &mut runtime, &mut stop_rx, &mut trigger_rx).await {
+                    match wait_for_outlook_delay(delay, &mut runtime, &mut stop_rx, &mut trigger_rx)
+                        .await
+                    {
                         SyncWaitOutcome::Stop => break 'sync_loop,
                         SyncWaitOutcome::ReadyToPoll => break,
                         SyncWaitOutcome::ContextChanged => continue,
@@ -403,12 +445,20 @@ impl OutlookSyncWorker {
             // Refresh token if needed
             if let Err(e) = self.ensure_valid_token().await {
                 warn!("Outlook token validation failed: {}", e);
-                self.base.emit_error("auth", &format!("Token validation failed: {e}"));
+                self.base
+                    .emit_error("auth", &format!("Token validation failed: {e}"));
                 let _ = backoff.record_failure();
                 if backoff.is_circuit_open() {
                     let delay = backoff.current_delay();
                     loop {
-                        match wait_for_outlook_delay(delay, &mut runtime, &mut stop_rx, &mut trigger_rx).await {
+                        match wait_for_outlook_delay(
+                            delay,
+                            &mut runtime,
+                            &mut stop_rx,
+                            &mut trigger_rx,
+                        )
+                        .await
+                        {
                             SyncWaitOutcome::Stop => break 'sync_loop,
                             SyncWaitOutcome::ReadyToPoll => break,
                             SyncWaitOutcome::ContextChanged => continue,
@@ -423,24 +473,42 @@ impl OutlookSyncWorker {
                 Ok(f) => f,
                 Err(e) => {
                     warn!("Outlook folder list failed: {e}");
-                    self.base.emit_error("sync", &format!("Outlook folder list failed: {e}"));
+                    self.base
+                        .emit_error("sync", &format!("Outlook folder list failed: {e}"));
                     let delay = backoff.record_failure();
                     if backoff.is_circuit_open() {
                         warn!(
                             "Circuit open for Outlook account {} ({} failures), waiting {:?}",
-                            self.base.account_id, backoff.failure_count(), delay
+                            self.base.account_id,
+                            backoff.failure_count(),
+                            delay
                         );
                     }
                     if backoff.is_circuit_open() {
                         loop {
-                            match wait_for_outlook_delay(delay, &mut runtime, &mut stop_rx, &mut trigger_rx).await {
+                            match wait_for_outlook_delay(
+                                delay,
+                                &mut runtime,
+                                &mut stop_rx,
+                                &mut trigger_rx,
+                            )
+                            .await
+                            {
                                 SyncWaitOutcome::Stop => break 'sync_loop,
                                 SyncWaitOutcome::ReadyToPoll => break,
                                 SyncWaitOutcome::ContextChanged => continue,
                             }
                         }
                     } else {
-                        if wait_for_outlook_policy_delay(&policy, &backoff, &mut runtime, &mut stop_rx, &mut trigger_rx).await {
+                        if wait_for_outlook_policy_delay(
+                            &policy,
+                            &backoff,
+                            &mut runtime,
+                            &mut stop_rx,
+                            &mut trigger_rx,
+                        )
+                        .await
+                        {
                             break 'sync_loop;
                         }
                     }
@@ -454,7 +522,11 @@ impl OutlookSyncWorker {
             }
 
             // Re-read folders from DB so we use persisted IDs (upsert may keep old IDs)
-            let db_folders = self.base.store.list_folders(&self.base.account_id).unwrap_or_default();
+            let db_folders = self
+                .base
+                .store
+                .list_folders(&self.base.account_id)
+                .unwrap_or_default();
             let mut sync_failure_count = 0u32;
 
             for folder in &db_folders {
@@ -467,14 +539,24 @@ impl OutlookSyncWorker {
                 let cursor = parse_outlook_delta_cursor(&folder.remote_id, state.as_deref());
                 let notify_new = cursor.is_some();
 
-                match collect_outlook_delta_pages(&folder.remote_id, cursor.as_deref(), |folder_id, cursor| {
-                    let provider = Arc::clone(&self.provider);
-                    async move { provider.fetch_delta_page(&folder_id, cursor.as_deref()).await }
-                })
+                match collect_outlook_delta_pages(
+                    &folder.remote_id,
+                    cursor.as_deref(),
+                    |folder_id, cursor| {
+                        let provider = Arc::clone(&self.provider);
+                        async move {
+                            provider
+                                .fetch_delta_page(&folder_id, cursor.as_deref())
+                                .await
+                        }
+                    },
+                )
                 .await
                 {
                     Ok(batch) => {
-                        let mut failure_count = self.persist_folder_messages(folder, batch.messages, notify_new).await;
+                        let mut failure_count = self
+                            .persist_folder_messages(folder, batch.messages, notify_new)
+                            .await;
 
                         match apply_outlook_deleted_remote_ids(
                             &self.base.store,
@@ -485,7 +567,10 @@ impl OutlookSyncWorker {
                                 failure_count += outcome.failure_count;
                             }
                             Err(e) => {
-                                warn!("Failed to load Outlook tombstones for folder {}: {e}", folder.name);
+                                warn!(
+                                    "Failed to load Outlook tombstones for folder {}: {e}",
+                                    folder.name
+                                );
                                 failure_count += 1;
                             }
                         }
@@ -493,13 +578,17 @@ impl OutlookSyncWorker {
 
                         if let Some(delta_link) = batch.delta_link {
                             if can_advance_outlook_delta_cursor(failure_count) {
-                                let state = serialize_outlook_delta_cursor(&folder.remote_id, &delta_link);
+                                let state =
+                                    serialize_outlook_delta_cursor(&folder.remote_id, &delta_link);
                                 if let Err(e) = self.base.store.set_folder_sync_state(
                                     &self.base.account_id,
                                     &folder.id,
                                     &state,
                                 ) {
-                                    warn!("Failed to persist Outlook delta cursor for folder {}: {e}", folder.name);
+                                    warn!(
+                                        "Failed to persist Outlook delta cursor for folder {}: {e}",
+                                        folder.name
+                                    );
                                 }
                             } else {
                                 warn!(
@@ -526,12 +615,23 @@ impl OutlookSyncWorker {
 
             update_outlook_backoff_after_sync(&mut backoff, sync_failure_count);
 
-            if wait_for_outlook_policy_delay(&policy, &backoff, &mut runtime, &mut stop_rx, &mut trigger_rx).await {
+            if wait_for_outlook_policy_delay(
+                &policy,
+                &backoff,
+                &mut runtime,
+                &mut stop_rx,
+                &mut trigger_rx,
+            )
+            .await
+            {
                 break;
             }
         }
 
-        info!("Outlook sync task completed for account {}", self.base.account_id);
+        info!(
+            "Outlook sync task completed for account {}",
+            self.base.account_id
+        );
     }
 }
 
@@ -631,21 +731,28 @@ mod tests {
         ]);
         let mut requested = Vec::new();
 
-        let batch = collect_outlook_delta_pages("folder-1", Some("cursor-0"), |folder_id, cursor| {
-            requested.push((folder_id, cursor));
-            let page = pages.pop_front().expect("expected a delta page request");
-            async move { Ok(page) }
-        })
-        .await
-        .unwrap();
+        let batch =
+            collect_outlook_delta_pages("folder-1", Some("cursor-0"), |folder_id, cursor| {
+                requested.push((folder_id, cursor));
+                let page = pages.pop_front().expect("expected a delta page request");
+                async move { Ok(page) }
+            })
+            .await
+            .unwrap();
 
         let remote_ids: Vec<_> = batch.messages.into_iter().map(|m| m.remote_id).collect();
-        assert_eq!(remote_ids, vec!["outlook-1".to_string(), "outlook-2".to_string()]);
+        assert_eq!(
+            remote_ids,
+            vec!["outlook-1".to_string(), "outlook-2".to_string()]
+        );
         assert_eq!(
             batch.deleted_remote_ids,
             vec!["deleted-1".to_string(), "deleted-2".to_string()]
         );
-        assert_eq!(batch.delta_link.as_deref(), Some("https://graph.example/delta"));
+        assert_eq!(
+            batch.delta_link.as_deref(),
+            Some("https://graph.example/delta")
+        );
         assert_eq!(
             requested,
             vec![
@@ -667,7 +774,9 @@ mod tests {
 
         store.insert_account(&account).unwrap();
         store.insert_folder(&folder).unwrap();
-        store.insert_message(&message, &[folder.id.clone()]).unwrap();
+        store
+            .insert_message(&message, &[folder.id.clone()])
+            .unwrap();
 
         let outcome = apply_outlook_deleted_remote_ids(
             &store,
@@ -704,7 +813,10 @@ mod tests {
             },
         );
 
-        assert_eq!(attempted, vec!["message-1".to_string(), "message-2".to_string()]);
+        assert_eq!(
+            attempted,
+            vec!["message-1".to_string(), "message-2".to_string()]
+        );
         assert_eq!(outcome.deleted_count, 1);
         assert_eq!(outcome.failure_count, 1);
     }
@@ -719,5 +831,4 @@ mod tests {
         update_outlook_backoff_after_sync(&mut backoff, 0);
         assert_eq!(backoff.failure_count(), 0);
     }
-
 }

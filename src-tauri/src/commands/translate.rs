@@ -7,7 +7,9 @@ use tauri::State;
 /// Decode a hex string to bytes.
 fn hex_decode(s: &str) -> std::result::Result<Vec<u8>, PebbleError> {
     if s.len() % 2 != 0 {
-        return Err(PebbleError::Internal("Invalid hex string length".to_string()));
+        return Err(PebbleError::Internal(
+            "Invalid hex string length".to_string(),
+        ));
     }
     (0..s.len())
         .step_by(2)
@@ -32,7 +34,8 @@ fn decrypt_config(state: &AppState, stored: &str) -> std::result::Result<String,
     }
     let bytes = hex_decode(stored)?;
     let decrypted = state.crypto.decrypt(&bytes)?;
-    String::from_utf8(decrypted).map_err(|e| PebbleError::Internal(format!("Invalid UTF-8 in decrypted config: {e}")))
+    String::from_utf8(decrypted)
+        .map_err(|e| PebbleError::Internal(format!("Invalid UTF-8 in decrypted config: {e}")))
 }
 
 /// Encrypt a plaintext config string for storage.
@@ -148,9 +151,7 @@ fn validate_translate_url(url: &str) -> std::result::Result<(), PebbleError> {
 }
 
 #[tauri::command]
-pub async fn test_translate_connection(
-    config: String,
-) -> std::result::Result<String, PebbleError> {
+pub async fn test_translate_connection(config: String) -> std::result::Result<String, PebbleError> {
     let provider_config: TranslateProviderConfig = serde_json::from_str(&config)
         .map_err(|e| PebbleError::Translate(format!("Invalid config: {e}")))?;
 

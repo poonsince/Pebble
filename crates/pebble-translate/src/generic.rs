@@ -17,9 +17,18 @@ pub async fn translate(
 ) -> Result<TranslateResult> {
     let client = reqwest::Client::new();
     let mut body_map = serde_json::Map::new();
-    body_map.insert(text_param.to_string(), serde_json::Value::String(text.to_string()));
-    body_map.insert(source_lang_param.to_string(), serde_json::Value::String(from.to_string()));
-    body_map.insert(target_lang_param.to_string(), serde_json::Value::String(to.to_string()));
+    body_map.insert(
+        text_param.to_string(),
+        serde_json::Value::String(text.to_string()),
+    );
+    body_map.insert(
+        source_lang_param.to_string(),
+        serde_json::Value::String(from.to_string()),
+    );
+    body_map.insert(
+        target_lang_param.to_string(),
+        serde_json::Value::String(to.to_string()),
+    );
     let body = serde_json::Value::Object(body_map);
 
     let mut req = client.post(endpoint).json(&body);

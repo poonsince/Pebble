@@ -58,13 +58,11 @@ impl Store {
 
     pub fn list_trusted_senders(&self, account_id: &str) -> Result<Vec<TrustedSender>> {
         self.with_read(|conn| {
-            let mut stmt = conn
-                .prepare(
-                    "SELECT account_id, email, trust_type, created_at
+            let mut stmt = conn.prepare(
+                "SELECT account_id, email, trust_type, created_at
                      FROM trusted_senders WHERE account_id = ?1",
-                )?;
-            let rows = stmt
-                .query_map(params![account_id], row_to_trusted_sender)?;
+            )?;
+            let rows = stmt.query_map(params![account_id], row_to_trusted_sender)?;
             let mut senders = Vec::new();
             for row in rows {
                 senders.push(row?);
@@ -112,11 +110,15 @@ mod tests {
         store.trust_sender(&sender).unwrap();
 
         // Check trust
-        let trust = store.is_trusted_sender(&account.id, "trusted@example.com").unwrap();
+        let trust = store
+            .is_trusted_sender(&account.id, "trusted@example.com")
+            .unwrap();
         assert_eq!(trust, Some(TrustType::Images));
 
         // Unknown sender
-        let trust = store.is_trusted_sender(&account.id, "unknown@example.com").unwrap();
+        let trust = store
+            .is_trusted_sender(&account.id, "unknown@example.com")
+            .unwrap();
         assert_eq!(trust, None);
 
         // List
@@ -132,11 +134,15 @@ mod tests {
             created_at: now,
         };
         store.trust_sender(&sender2).unwrap();
-        let trust = store.is_trusted_sender(&account.id, "trusted@example.com").unwrap();
+        let trust = store
+            .is_trusted_sender(&account.id, "trusted@example.com")
+            .unwrap();
         assert_eq!(trust, Some(TrustType::All));
 
         // Remove
-        store.remove_trusted_sender(&account.id, "trusted@example.com").unwrap();
+        store
+            .remove_trusted_sender(&account.id, "trusted@example.com")
+            .unwrap();
         let senders = store.list_trusted_senders(&account.id).unwrap();
         assert_eq!(senders.len(), 0);
     }

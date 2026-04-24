@@ -31,13 +31,11 @@ impl Store {
 
     pub fn list_snoozed_messages(&self) -> Result<Vec<SnoozedMessage>> {
         self.with_read(|conn| {
-            let mut stmt = conn
-                .prepare(
-                    "SELECT message_id, snoozed_at, unsnoozed_at, return_to
+            let mut stmt = conn.prepare(
+                "SELECT message_id, snoozed_at, unsnoozed_at, return_to
                      FROM snoozed_messages",
-                )?;
-            let rows = stmt
-                .query_map([], row_to_snoozed)?;
+            )?;
+            let rows = stmt.query_map([], row_to_snoozed)?;
             let mut results = Vec::new();
             for row in rows {
                 results.push(row?);
@@ -48,13 +46,11 @@ impl Store {
 
     pub fn get_due_snoozed(&self, now: i64) -> Result<Vec<SnoozedMessage>> {
         self.with_read(|conn| {
-            let mut stmt = conn
-                .prepare(
-                    "SELECT message_id, snoozed_at, unsnoozed_at, return_to
+            let mut stmt = conn.prepare(
+                "SELECT message_id, snoozed_at, unsnoozed_at, return_to
                      FROM snoozed_messages WHERE unsnoozed_at <= ?1",
-                )?;
-            let rows = stmt
-                .query_map(params![now], row_to_snoozed)?;
+            )?;
+            let rows = stmt.query_map(params![now], row_to_snoozed)?;
             let mut results = Vec::new();
             for row in rows {
                 results.push(row?);

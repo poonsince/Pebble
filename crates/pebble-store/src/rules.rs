@@ -40,13 +40,11 @@ impl Store {
 
     pub fn list_rules(&self) -> Result<Vec<Rule>> {
         self.with_read(|conn| {
-            let mut stmt = conn
-                .prepare(
-                    "SELECT id, name, priority, conditions, actions, is_enabled, created_at, updated_at
+            let mut stmt = conn.prepare(
+                "SELECT id, name, priority, conditions, actions, is_enabled, created_at, updated_at
                      FROM rules ORDER BY priority ASC",
-                )?;
-            let rows = stmt
-                .query_map([], row_to_rule)?;
+            )?;
+            let rows = stmt.query_map([], row_to_rule)?;
             let mut rules = Vec::new();
             for row in rows {
                 rules.push(row?);

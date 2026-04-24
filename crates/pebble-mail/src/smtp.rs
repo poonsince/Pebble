@@ -96,11 +96,7 @@ impl SmtpSender {
             .singlepart(
                 SinglePart::builder()
                     .content_type(ContentType::TEXT_HTML)
-                    .body(
-                        body_html
-                            .unwrap_or(body_text)
-                            .to_string(),
-                    ),
+                    .body(body_html.unwrap_or(body_text).to_string()),
             );
 
         let email = if attachment_paths.is_empty() {
@@ -119,18 +115,15 @@ impl SmtpSender {
                     .to_string();
 
                 let file_bytes = std::fs::read(path).map_err(|e| {
-                    PebbleError::Internal(format!(
-                        "Failed to read attachment '{}': {e}",
-                        path_str
-                    ))
+                    PebbleError::Internal(format!("Failed to read attachment '{}': {e}", path_str))
                 })?;
 
                 let content_type = mime_type_from_extension(
                     path.extension().and_then(|e| e.to_str()).unwrap_or(""),
                 );
 
-                let attachment = Attachment::new(filename)
-                    .body(Body::new(file_bytes), content_type);
+                let attachment =
+                    Attachment::new(filename).body(Body::new(file_bytes), content_type);
 
                 mixed = mixed.singlepart(attachment);
             }
@@ -181,11 +174,7 @@ impl SmtpSender {
     }
 
     /// Send via a SOCKS5 proxy using a manually managed AsyncSmtpConnection.
-    async fn send_via_proxy(
-        &self,
-        email: &lettre::Message,
-        proxy: &ProxyConfig,
-    ) -> Result<()> {
+    async fn send_via_proxy(&self, email: &lettre::Message, proxy: &ProxyConfig) -> Result<()> {
         let proxy_addr = format!("{}:{}", proxy.host, proxy.port);
         let target = format!("{}:{}", self.host, self.port);
 
@@ -196,12 +185,10 @@ impl SmtpSender {
         match self.security {
             ConnectionSecurity::Tls => {
                 // Connect through SOCKS5 to the SMTP host:port
-                let socks_stream = tokio_socks::tcp::Socks5Stream::connect(
-                    proxy_addr.as_str(),
-                    target.as_str(),
-                )
-                .await
-                .map_err(|e| PebbleError::Network(format!("SOCKS5 connect failed: {e}")))?;
+                let socks_stream =
+                    tokio_socks::tcp::Socks5Stream::connect(proxy_addr.as_str(), target.as_str())
+                        .await
+                        .map_err(|e| PebbleError::Network(format!("SOCKS5 connect failed: {e}")))?;
 
                 // We need to upgrade the raw TCP stream to TLS before SMTP handshake.
                 // Use tokio-rustls directly since we already have a connected stream.
@@ -224,12 +211,10 @@ impl SmtpSender {
                 authenticate_and_send(&mut conn, &self.credentials, email).await?;
             }
             ConnectionSecurity::StartTls => {
-                let socks_stream = tokio_socks::tcp::Socks5Stream::connect(
-                    proxy_addr.as_str(),
-                    target.as_str(),
-                )
-                .await
-                .map_err(|e| PebbleError::Network(format!("SOCKS5 connect failed: {e}")))?;
+                let socks_stream =
+                    tokio_socks::tcp::Socks5Stream::connect(proxy_addr.as_str(), target.as_str())
+                        .await
+                        .map_err(|e| PebbleError::Network(format!("SOCKS5 connect failed: {e}")))?;
 
                 let mut conn = AsyncSmtpConnection::connect_with_transport(
                     Box::new(Socks5TokioStream(socks_stream)),
@@ -252,12 +237,10 @@ impl SmtpSender {
                 authenticate_and_send(&mut conn, &self.credentials, email).await?;
             }
             ConnectionSecurity::Plain => {
-                let socks_stream = tokio_socks::tcp::Socks5Stream::connect(
-                    proxy_addr.as_str(),
-                    target.as_str(),
-                )
-                .await
-                .map_err(|e| PebbleError::Network(format!("SOCKS5 connect failed: {e}")))?;
+                let socks_stream =
+                    tokio_socks::tcp::Socks5Stream::connect(proxy_addr.as_str(), target.as_str())
+                        .await
+                        .map_err(|e| PebbleError::Network(format!("SOCKS5 connect failed: {e}")))?;
 
                 let mut conn = AsyncSmtpConnection::connect_with_transport(
                     Box::new(Socks5TokioStream(socks_stream)),
@@ -449,10 +432,10 @@ fn mime_type_from_extension(ext: &str) -> ContentType {
         )
         .unwrap(),
         "xls" => ContentType::parse("application/vnd.ms-excel").unwrap(),
-        "xlsx" => ContentType::parse(
-            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        )
-        .unwrap(),
+        "xlsx" => {
+            ContentType::parse("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+                .unwrap()
+        }
         "ppt" => ContentType::parse("application/vnd.ms-powerpoint").unwrap(),
         "pptx" => ContentType::parse(
             "application/vnd.openxmlformats-officedocument.presentationml.presentation",

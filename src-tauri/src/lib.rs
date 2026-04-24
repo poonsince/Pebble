@@ -42,9 +42,7 @@ fn log_startup_phase(start: Instant, phase_start: &mut Instant, label: &'static 
 }
 
 fn get_db_path(app: &tauri::App) -> Result<PathBuf, Box<dyn std::error::Error>> {
-    let app_data = app
-        .path()
-        .app_data_dir()?;
+    let app_data = app.path().app_data_dir()?;
     std::fs::create_dir_all(&app_data)?;
     let db_dir = app_data.join("db");
     std::fs::create_dir_all(&db_dir)?;
@@ -52,9 +50,7 @@ fn get_db_path(app: &tauri::App) -> Result<PathBuf, Box<dyn std::error::Error>> 
 }
 
 fn get_index_path(app: &tauri::App) -> Result<PathBuf, Box<dyn std::error::Error>> {
-    let app_data = app
-        .path()
-        .app_data_dir()?;
+    let app_data = app.path().app_data_dir()?;
     let index_dir = app_data.join("search_index");
     std::fs::create_dir_all(&index_dir)?;
     Ok(index_dir)

@@ -245,12 +245,18 @@ mod tests {
         assert!(!background.app_foreground);
         assert!(!background.recent_activity);
 
-        runtime.record_trigger(SyncTrigger::NetworkOnline, started + std::time::Duration::from_secs(1));
+        runtime.record_trigger(
+            SyncTrigger::NetworkOnline,
+            started + std::time::Duration::from_secs(1),
+        );
         let background_recent = runtime.context(0, started + std::time::Duration::from_secs(2));
         assert!(!background_recent.app_foreground);
         assert!(background_recent.recent_activity);
 
-        runtime.record_trigger(SyncTrigger::WindowFocus, started + std::time::Duration::from_secs(2));
+        runtime.record_trigger(
+            SyncTrigger::WindowFocus,
+            started + std::time::Duration::from_secs(2),
+        );
         let recent = runtime.context(0, started + std::time::Duration::from_secs(30));
         assert!(recent.app_foreground);
         assert!(recent.recent_activity);
@@ -262,7 +268,10 @@ mod tests {
 
     #[test]
     fn sync_trigger_from_reason_supports_window_blur() {
-        assert_eq!(SyncTrigger::from_reason("window_blur"), SyncTrigger::WindowBlur);
+        assert_eq!(
+            SyncTrigger::from_reason("window_blur"),
+            SyncTrigger::WindowBlur
+        );
         assert!(!SyncTrigger::WindowBlur.should_sync_now());
         assert!(SyncTrigger::WindowFocus.should_sync_now());
     }

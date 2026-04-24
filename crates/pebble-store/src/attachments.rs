@@ -80,7 +80,7 @@ impl Store {
 #[cfg(test)]
 mod tests {
     use crate::Store;
-    use pebble_core::{Attachment, new_id, now_timestamp};
+    use pebble_core::{new_id, now_timestamp, Attachment};
 
     fn setup_store_with_message() -> (Store, String) {
         let store = Store::open_in_memory().unwrap();

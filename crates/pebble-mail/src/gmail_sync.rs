@@ -13,10 +13,13 @@ use tokio::sync::{mpsc, watch};
 use tracing::{debug, error, info, warn};
 
 use crate::backoff::SyncBackoff;
-use crate::provider::gmail::{visible_label_ids, GmailFetchedMessage, GmailMessageRef, GmailProvider};
+use crate::provider::gmail::{
+    visible_label_ids, GmailFetchedMessage, GmailMessageRef, GmailProvider,
+};
 use crate::realtime_policy::{RealtimePollPolicy, RealtimeRuntimeState, SyncTrigger};
 use crate::sync::{
-    persist_message_attachments_async, recv_sync_trigger, StoredMessage, SyncConfig, SyncError, SyncWorkerBase,
+    persist_message_attachments_async, recv_sync_trigger, StoredMessage, SyncConfig, SyncError,
+    SyncWorkerBase,
 };
 use crate::thread::compute_thread_id;
 
@@ -383,7 +386,13 @@ impl GmailSyncWorker {
 
         for label_id in &labels_to_sync {
             match self
-                .sync_label(label_id, limit, &folders_by_remote, &mut thread_mappings, notify_new)
+                .sync_label(
+                    label_id,
+                    limit,
+                    &folders_by_remote,
+                    &mut thread_mappings,
+                    notify_new,
+                )
                 .await
             {
                 Ok(outcome) => {
@@ -435,15 +444,16 @@ impl GmailSyncWorker {
 
         // List all message IDs from Gmail. The list endpoint is paginated and
         // silently truncates the initial sync if the next page token is ignored.
-        let msg_refs = collect_paginated_gmail_refs(label_id, limit, |label_id, limit, page_token| {
-            let provider = Arc::clone(&self.provider);
-            async move {
-                provider
-                    .list_message_ids(&label_id, limit, page_token.as_deref())
-                    .await
-            }
-        })
-        .await?;
+        let msg_refs =
+            collect_paginated_gmail_refs(label_id, limit, |label_id, limit, page_token| {
+                let provider = Arc::clone(&self.provider);
+                async move {
+                    provider
+                        .list_message_ids(&label_id, limit, page_token.as_deref())
+                        .await
+                }
+            })
+            .await?;
         if msg_refs.is_empty() {
             return Ok(GmailLabelSyncOutcome::default());
         }
@@ -492,7 +502,13 @@ impl GmailSyncWorker {
         for (gmail_id, result) in fetched_results {
             match result {
                 Ok(fetched) => match self
-                    .store_fetched_message(fetched, &folder_id, thread_mappings, folders_by_remote, notify_new)
+                    .store_fetched_message(
+                        fetched,
+                        &folder_id,
+                        thread_mappings,
+                        folders_by_remote,
+                        notify_new,
+                    )
                     .await
                 {
                     Ok(true) => outcome.stored_count += 1,
@@ -835,7 +851,10 @@ impl GmailSyncWorker {
         match self.poll_changes().await {
             Ok(()) => backoff.record_success(),
             Err(e) => {
-                warn!("Gmail poll failed for account {}: {}", self.base.account_id, e);
+                warn!(
+                    "Gmail poll failed for account {}: {}",
+                    self.base.account_id, e
+                );
                 self.base.emit_error("sync", &format!("Poll failed: {e}"));
                 let _ = backoff.record_failure();
             }
@@ -871,7 +890,10 @@ impl GmailSyncWorker {
         }
 
         if config.manual_only() {
-            info!("Gmail manual sync completed for account {}", self.base.account_id);
+            info!(
+                "Gmail manual sync completed for account {}",
+                self.base.account_id
+            );
             return;
         }
 
@@ -882,7 +904,8 @@ impl GmailSyncWorker {
         let mut runtime = RealtimeRuntimeState::new(Duration::from_secs(60), Instant::now());
 
         loop {
-            let next_delay = policy.next_delay(runtime.context(backoff.failure_count(), Instant::now()));
+            let next_delay =
+                policy.next_delay(runtime.context(backoff.failure_count(), Instant::now()));
 
             tokio::select! {
                 _ = stop_rx.changed() => {

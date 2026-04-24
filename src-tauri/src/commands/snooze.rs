@@ -1,6 +1,6 @@
 use crate::events;
 use crate::state::AppState;
-use pebble_core::{PebbleError, SnoozedMessage, now_timestamp};
+use pebble_core::{now_timestamp, PebbleError, SnoozedMessage};
 use tauri::{AppHandle, Emitter, State};
 
 #[tauri::command]

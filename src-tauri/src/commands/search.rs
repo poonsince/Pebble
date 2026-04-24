@@ -1,6 +1,6 @@
 use crate::state::AppState;
-use pebble_core::PebbleError;
 use pebble_core::traits::SearchHit;
+use pebble_core::PebbleError;
 use tauri::State;
 
 #[tauri::command]

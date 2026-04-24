@@ -8,6 +8,7 @@ export function useMessageLoader(messageId: string | null, privacyMode: PrivacyM
   const flagsMutation = useUpdateFlagsMutation();
   const [message, setMessage] = useState<Message | null>(null);
   const [rendered, setRendered] = useState<RenderedHtml | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const privacyModeRef = useRef(privacyMode);
   const renderedKeyRef = useRef<string | null>(null);
@@ -23,6 +24,7 @@ export function useMessageLoader(messageId: string | null, privacyMode: PrivacyM
     if (!messageId) {
       setMessage(null);
       setRendered(null);
+      setError(null);
       renderedKeyRef.current = null;
       setLoading(false);
       return;
@@ -34,6 +36,7 @@ export function useMessageLoader(messageId: string | null, privacyMode: PrivacyM
     setLoading(true);
     setMessage(null);
     setRendered(null);
+    setError(null);
     renderedKeyRef.current = null;
 
     async function load() {
@@ -47,6 +50,10 @@ export function useMessageLoader(messageId: string | null, privacyMode: PrivacyM
 
         if (!cancelled && !msg.is_read) {
           flagsMutation.mutate({ messageId: messageId!, isRead: true });
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setError(err instanceof Error ? err.message : String(err));
         }
       } finally {
         if (!cancelled) setLoading(false);
@@ -65,16 +72,23 @@ export function useMessageLoader(messageId: string | null, privacyMode: PrivacyM
 
     let cancelled = false;
     setRendered(null);
+    setError(null);
 
-    getRenderedHtml(messageId, privacyMode).then((html) => {
-      if (!cancelled) {
-        renderedKeyRef.current = currentRenderKey;
-        setRendered({ ...html, html: sanitizeHtml(html.html) });
-      }
-    });
+    getRenderedHtml(messageId, privacyMode)
+      .then((html) => {
+        if (!cancelled) {
+          renderedKeyRef.current = currentRenderKey;
+          setRendered({ ...html, html: sanitizeHtml(html.html) });
+        }
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setError(err instanceof Error ? err.message : String(err));
+        }
+      });
 
     return () => { cancelled = true; };
   }, [privacyMode, messageId, message]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  return { message, setMessage, rendered, loading };
+  return { message, setMessage, rendered, loading, error };
 }

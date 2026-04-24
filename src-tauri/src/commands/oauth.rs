@@ -1,5 +1,5 @@
 use crate::state::AppState;
-use pebble_core::{Account, OAuthTokens, PebbleError, ProviderType, new_id, now_timestamp};
+use pebble_core::{new_id, now_timestamp, Account, OAuthTokens, PebbleError, ProviderType};
 use pebble_crypto::CryptoService;
 use pebble_mail::gmail_sync::TokenRefresher;
 use pebble_oauth::{OAuthConfig, OAuthManager};
@@ -21,7 +21,10 @@ fn constant_time_eq(left: &str, right: &str) -> bool {
 }
 
 /// Fetch the user's email and display name from the OAuth provider's userinfo endpoint.
-async fn fetch_userinfo(provider: &str, access_token: &str) -> Result<(String, String), PebbleError> {
+async fn fetch_userinfo(
+    provider: &str,
+    access_token: &str,
+) -> Result<(String, String), PebbleError> {
     let url = match provider.to_lowercase().as_str() {
         "gmail" => "https://www.googleapis.com/oauth2/v2/userinfo",
         "outlook" => "https://graph.microsoft.com/v1.0/me",
@@ -39,13 +42,15 @@ async fn fetch_userinfo(provider: &str, access_token: &str) -> Result<(String, S
         .await
         .map_err(|e| PebbleError::Network(format!("Userinfo parse failed: {e}")))?;
 
-    let email = resp["email"].as_str()
+    let email = resp["email"]
+        .as_str()
         .or_else(|| resp["mail"].as_str())
         .or_else(|| resp["userPrincipalName"].as_str())
         .unwrap_or("")
         .to_string();
 
-    let name = resp["name"].as_str()
+    let name = resp["name"]
+        .as_str()
         .or_else(|| resp["displayName"].as_str())
         .unwrap_or("")
         .to_string();
@@ -57,9 +62,11 @@ async fn fetch_userinfo(provider: &str, access_token: &str) -> Result<(String, S
 /// OAuth config for Gmail (Google).
 pub(crate) fn gmail_oauth_config() -> OAuthConfig {
     OAuthConfig {
-        client_id: option_env!("GOOGLE_CLIENT_ID")
-            .unwrap_or("GOOGLE_CLIENT_ID_PLACEHOLDER")
-            .to_string(),
+        client_id: oauth_config_value(
+            "GOOGLE_CLIENT_ID",
+            option_env!("GOOGLE_CLIENT_ID"),
+            "GOOGLE_CLIENT_ID_PLACEHOLDER",
+        ),
         client_secret: None,
         auth_url: "https://accounts.google.com/o/oauth2/v2/auth".to_string(),
         token_url: "https://oauth2.googleapis.com/token".to_string(),
@@ -75,9 +82,15 @@ pub(crate) fn gmail_oauth_config() -> OAuthConfig {
 /// OAuth config for Outlook (Microsoft).
 pub(crate) fn outlook_oauth_config() -> OAuthConfig {
     OAuthConfig {
-        client_id: std::env::var("MICROSOFT_CLIENT_ID")
-            .unwrap_or_else(|_| "MICROSOFT_CLIENT_ID_PLACEHOLDER".to_string()),
-        client_secret: std::env::var("MICROSOFT_CLIENT_SECRET").ok(),
+        client_id: oauth_config_value(
+            "MICROSOFT_CLIENT_ID",
+            option_env!("MICROSOFT_CLIENT_ID"),
+            "MICROSOFT_CLIENT_ID_PLACEHOLDER",
+        ),
+        client_secret: oauth_config_optional_value(
+            "MICROSOFT_CLIENT_SECRET",
+            option_env!("MICROSOFT_CLIENT_SECRET"),
+        ),
         auth_url: "https://login.microsoftonline.com/common/oauth2/v2.0/authorize".to_string(),
         token_url: "https://login.microsoftonline.com/common/oauth2/v2.0/token".to_string(),
         scopes: vec![
@@ -87,6 +100,93 @@ pub(crate) fn outlook_oauth_config() -> OAuthConfig {
             "offline_access".to_string(),
         ],
         redirect_port: 0,
+    }
+}
+
+fn dotenv_lookup_from_str(contents: &str, key: &str) -> Option<String> {
+    for raw_line in contents.lines() {
+        let line = raw_line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+
+        let Some((name, value)) = line.split_once('=') else {
+            continue;
+        };
+        if name.trim() != key {
+            continue;
+        }
+
+        let value = value.trim();
+        let unquoted = value
+            .strip_prefix('"')
+            .and_then(|v| v.strip_suffix('"'))
+            .or_else(|| value.strip_prefix('\'').and_then(|v| v.strip_suffix('\'')))
+            .unwrap_or(value);
+        return Some(unquoted.to_string());
+    }
+    None
+}
+
+fn dotenv_contents() -> Option<String> {
+    let mut candidates = Vec::new();
+    if let Ok(current_dir) = std::env::current_dir() {
+        candidates.push(current_dir.join(".env"));
+        candidates.push(current_dir.join("..").join(".env"));
+    }
+    candidates.push(std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(".env"));
+    candidates.push(
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join(".env"),
+    );
+
+    candidates
+        .into_iter()
+        .find_map(|path| std::fs::read_to_string(path).ok())
+}
+
+fn oauth_config_value_from_sources(
+    key: &str,
+    env_value: Option<&str>,
+    dotenv_contents: Option<&str>,
+    compile_value: Option<&str>,
+    placeholder: &str,
+) -> String {
+    env_value
+        .filter(|value| !is_placeholder(value))
+        .map(ToOwned::to_owned)
+        .or_else(|| {
+            dotenv_contents
+                .and_then(|contents| dotenv_lookup_from_str(contents, key))
+                .filter(|value| !is_placeholder(value))
+        })
+        .or_else(|| {
+            compile_value
+                .filter(|value| !is_placeholder(value))
+                .map(ToOwned::to_owned)
+        })
+        .unwrap_or_else(|| placeholder.to_string())
+}
+
+fn oauth_config_value(key: &str, compile_value: Option<&str>, placeholder: &str) -> String {
+    let env_value = std::env::var(key).ok();
+    let dotenv = dotenv_contents();
+    oauth_config_value_from_sources(
+        key,
+        env_value.as_deref(),
+        dotenv.as_deref(),
+        compile_value,
+        placeholder,
+    )
+}
+
+fn oauth_config_optional_value(key: &str, compile_value: Option<&str>) -> Option<String> {
+    let value = oauth_config_value(key, compile_value, "");
+    if is_placeholder(&value) {
+        None
+    } else {
+        Some(value)
     }
 }
 
@@ -121,9 +221,11 @@ pub(crate) fn config_for_provider(provider: &str) -> Result<OAuthConfig, PebbleE
     let config = match provider.to_lowercase().as_str() {
         "gmail" => gmail_oauth_config(),
         "outlook" => outlook_oauth_config(),
-        _ => return Err(PebbleError::UnsupportedProvider(format!(
-            "Unknown OAuth provider: {provider}"
-        ))),
+        _ => {
+            return Err(PebbleError::UnsupportedProvider(format!(
+                "Unknown OAuth provider: {provider}"
+            )))
+        }
     };
     validate_oauth_config(&config, provider)?;
     Ok(config)
@@ -234,9 +336,11 @@ pub(crate) fn build_oauth_token_refresher(
                         Some(encrypted) => {
                             let decrypted = crypto.decrypt(&encrypted)?;
                             let token_data: serde_json::Value = serde_json::from_slice(&decrypted)
-                                .map_err(|e| PebbleError::Internal(
-                                    format!("Failed to parse token data: {e}")
-                                ))?;
+                                .map_err(|e| {
+                                    PebbleError::Internal(format!(
+                                        "Failed to parse token data: {e}"
+                                    ))
+                                })?;
                             token_data["refresh_token"]
                                 .as_str()
                                 .map(|s| s.to_string())
@@ -260,7 +364,7 @@ pub(crate) fn build_oauth_token_refresher(
                     Ok((token_pair.access_token, token_pair.expires_at))
                 })
             })
-        },
+        }
         None => Box::new(move || {
             let token = fallback_access_token.clone();
             Box::pin(async move { Ok((token, None)) })
@@ -273,10 +377,9 @@ pub(crate) async fn ensure_account_oauth_tokens(
     account_id: &str,
     provider: &str,
 ) -> Result<OAuthTokens, PebbleError> {
-    let encrypted = state
-        .store
-        .get_auth_data(account_id)?
-        .ok_or_else(|| PebbleError::Internal(format!("No auth data found for account {account_id}")))?;
+    let encrypted = state.store.get_auth_data(account_id)?.ok_or_else(|| {
+        PebbleError::Internal(format!("No auth data found for account {account_id}"))
+    })?;
     let decrypted = state.crypto.decrypt(&encrypted)?;
     let mut tokens: OAuthTokens = serde_json::from_slice(&decrypted)
         .map_err(|e| PebbleError::Internal(format!("Failed to parse OAuth tokens: {e}")))?;
@@ -357,11 +460,20 @@ pub async fn complete_oauth_flow(
         .map_err(|e| PebbleError::OAuth(format!("Token exchange failed: {e}")))?;
 
     // Fetch user info from Google/Microsoft to get actual email and display name
-    let (real_email, real_name) = fetch_userinfo(&provider, &token_pair.access_token).await
+    let (real_email, real_name) = fetch_userinfo(&provider, &token_pair.access_token)
+        .await
         .unwrap_or_else(|_| (email.clone(), display_name.clone()));
 
-    let final_email = if real_email.is_empty() { email } else { real_email };
-    let final_name = if real_name.is_empty() { display_name } else { real_name };
+    let final_email = if real_email.is_empty() {
+        email
+    } else {
+        real_email
+    };
+    let final_name = if real_name.is_empty() {
+        display_name
+    } else {
+        real_name
+    };
 
     // Create the account
     let now = now_timestamp();
@@ -400,4 +512,65 @@ pub async fn complete_oauth_flow(
     }
 
     Ok(account)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn dotenv_lookup_reads_unquoted_and_quoted_values() {
+        let dotenv = r#"
+GOOGLE_CLIENT_ID=google-client.apps.googleusercontent.com
+MICROSOFT_CLIENT_ID="microsoft-client"
+MICROSOFT_CLIENT_SECRET='microsoft-secret'
+"#;
+
+        assert_eq!(
+            dotenv_lookup_from_str(dotenv, "GOOGLE_CLIENT_ID").as_deref(),
+            Some("google-client.apps.googleusercontent.com")
+        );
+        assert_eq!(
+            dotenv_lookup_from_str(dotenv, "MICROSOFT_CLIENT_ID").as_deref(),
+            Some("microsoft-client")
+        );
+        assert_eq!(
+            dotenv_lookup_from_str(dotenv, "MICROSOFT_CLIENT_SECRET").as_deref(),
+            Some("microsoft-secret")
+        );
+    }
+
+    #[test]
+    fn oauth_config_value_prefers_process_env_then_dotenv_then_compile_env() {
+        assert_eq!(
+            oauth_config_value_from_sources(
+                "GOOGLE_CLIENT_ID",
+                Some("from-env"),
+                Some("GOOGLE_CLIENT_ID=from-dotenv"),
+                Some("from-compile"),
+                "placeholder",
+            ),
+            "from-env"
+        );
+        assert_eq!(
+            oauth_config_value_from_sources(
+                "GOOGLE_CLIENT_ID",
+                None,
+                Some("GOOGLE_CLIENT_ID=from-dotenv"),
+                Some("from-compile"),
+                "placeholder",
+            ),
+            "from-dotenv"
+        );
+        assert_eq!(
+            oauth_config_value_from_sources(
+                "GOOGLE_CLIENT_ID",
+                None,
+                None,
+                Some("from-compile"),
+                "placeholder",
+            ),
+            "from-compile"
+        );
+    }
 }

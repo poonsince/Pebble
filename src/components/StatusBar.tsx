@@ -108,7 +108,7 @@ export default function StatusBar() {
       setSyncStatus("syncing");
       try {
         await syncMutation.mutateAsync(activeAccountId);
-        // Don't set idle here — wait for mail:sync-complete event
+        setSyncStatus("idle");
       } catch {
         setSyncStatus("error");
       }

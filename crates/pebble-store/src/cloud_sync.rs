@@ -43,9 +43,7 @@ pub fn preview_backup(data: &[u8]) -> Result<BackupPreview> {
         )));
     }
     let backup: SettingsBackup = serde_json::from_slice(data).map_err(|e| {
-        PebbleError::Validation(format!(
-            "Backup file is not a valid settings backup: {e}"
-        ))
+        PebbleError::Validation(format!("Backup file is not a valid settings backup: {e}"))
     })?;
     if backup.version == 0 || backup.version > BACKUP_SCHEMA_VERSION {
         return Err(PebbleError::Validation(format!(

@@ -115,10 +115,7 @@ pub fn parse_raw_email(raw: &[u8]) -> Result<ParsedMessage> {
     let bcc_list = address_to_list(message.bcc());
 
     // Date
-    let date = message
-        .date()
-        .map(|d| d.to_timestamp())
-        .unwrap_or(0);
+    let date = message.date().map(|d| d.to_timestamp()).unwrap_or(0);
 
     // Body
     let body_text = message
@@ -137,10 +134,7 @@ pub fn parse_raw_email(raw: &[u8]) -> Result<ParsedMessage> {
     let attachments: Vec<AttachmentData> = message
         .attachments()
         .map(|part| {
-            let filename = part
-                .attachment_name()
-                .unwrap_or("unnamed")
-                .to_string();
+            let filename = part.attachment_name().unwrap_or("unnamed").to_string();
             let mime_type = part
                 .content_type()
                 .map(|ct| {

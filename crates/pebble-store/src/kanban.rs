@@ -30,7 +30,10 @@ fn row_to_kanban_card(row: &rusqlite::Row) -> rusqlite::Result<KanbanCard> {
 }
 
 impl Store {
-    pub(crate) fn upsert_kanban_card_with_conn(conn: &rusqlite::Connection, card: &KanbanCard) -> Result<()> {
+    pub(crate) fn upsert_kanban_card_with_conn(
+        conn: &rusqlite::Connection,
+        card: &KanbanCard,
+    ) -> Result<()> {
         conn.execute(
             "INSERT INTO kanban_cards (message_id, column_name, position, created_at, updated_at)
              VALUES (?1, ?2, ?3, ?4, ?5)
@@ -54,36 +57,30 @@ impl Store {
     }
 
     pub fn list_kanban_cards(&self, column: Option<&KanbanColumn>) -> Result<Vec<KanbanCard>> {
-        self.with_read(|conn| {
-            match column {
-                Some(col) => {
-                    let mut stmt = conn
-                        .prepare(
-                            "SELECT message_id, column_name, position, created_at, updated_at
+        self.with_read(|conn| match column {
+            Some(col) => {
+                let mut stmt = conn.prepare(
+                    "SELECT message_id, column_name, position, created_at, updated_at
                              FROM kanban_cards WHERE column_name = ?1 ORDER BY position ASC",
-                        )?;
-                    let rows = stmt
-                        .query_map(params![column_to_str(col)], row_to_kanban_card)?;
-                    let mut cards = Vec::new();
-                    for row in rows {
-                        cards.push(row?);
-                    }
-                    Ok(cards)
+                )?;
+                let rows = stmt.query_map(params![column_to_str(col)], row_to_kanban_card)?;
+                let mut cards = Vec::new();
+                for row in rows {
+                    cards.push(row?);
                 }
-                None => {
-                    let mut stmt = conn
-                        .prepare(
-                            "SELECT message_id, column_name, position, created_at, updated_at
+                Ok(cards)
+            }
+            None => {
+                let mut stmt = conn.prepare(
+                    "SELECT message_id, column_name, position, created_at, updated_at
                              FROM kanban_cards ORDER BY position ASC",
-                        )?;
-                    let rows = stmt
-                        .query_map([], row_to_kanban_card)?;
-                    let mut cards = Vec::new();
-                    for row in rows {
-                        cards.push(row?);
-                    }
-                    Ok(cards)
+                )?;
+                let rows = stmt.query_map([], row_to_kanban_card)?;
+                let mut cards = Vec::new();
+                for row in rows {
+                    cards.push(row?);
                 }
+                Ok(cards)
             }
         })
     }
@@ -200,7 +197,9 @@ mod tests {
         let todos = store.list_kanban_cards(Some(&KanbanColumn::Todo)).unwrap();
         assert_eq!(todos.len(), 1);
 
-        let waiting = store.list_kanban_cards(Some(&KanbanColumn::Waiting)).unwrap();
+        let waiting = store
+            .list_kanban_cards(Some(&KanbanColumn::Waiting))
+            .unwrap();
         assert_eq!(waiting.len(), 0);
 
         // Upsert should update
@@ -229,9 +228,13 @@ mod tests {
             updated_at: now,
         };
         store.upsert_kanban_card(&card).unwrap();
-        store.move_kanban_card(&msg_id, &KanbanColumn::Waiting, 5).unwrap();
+        store
+            .move_kanban_card(&msg_id, &KanbanColumn::Waiting, 5)
+            .unwrap();
 
-        let cards = store.list_kanban_cards(Some(&KanbanColumn::Waiting)).unwrap();
+        let cards = store
+            .list_kanban_cards(Some(&KanbanColumn::Waiting))
+            .unwrap();
         assert_eq!(cards.len(), 1);
         assert_eq!(cards[0].position, 5);
     }

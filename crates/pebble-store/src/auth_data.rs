@@ -50,7 +50,7 @@ impl Store {
 
 #[cfg(test)]
 mod tests {
-    use pebble_core::{Account, ProviderType, new_id, now_timestamp};
+    use pebble_core::{new_id, now_timestamp, Account, ProviderType};
 
     fn test_account() -> Account {
         Account {

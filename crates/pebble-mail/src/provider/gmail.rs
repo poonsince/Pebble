@@ -174,7 +174,10 @@ impl GmailProvider {
     }
 
     pub fn token(&self) -> String {
-        self.access_token.read().unwrap_or_else(|e| e.into_inner()).clone()
+        self.access_token
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
     }
 
     pub(crate) async fn get(&self, url: &str) -> Result<reqwest::Response> {
@@ -324,9 +327,8 @@ impl GmailProvider {
         max_results: u32,
         page_token: Option<&str>,
     ) -> Result<(Vec<GmailMessageRef>, Option<String>)> {
-        let mut url = format!(
-            "{GMAIL_API_BASE}/messages?labelIds={label_id}&maxResults={max_results}"
-        );
+        let mut url =
+            format!("{GMAIL_API_BASE}/messages?labelIds={label_id}&maxResults={max_results}");
         if let Some(token) = page_token {
             url.push_str(&format!("&pageToken={token}"));
         }
@@ -417,9 +419,7 @@ impl GmailProvider {
             "Parsing Gmail message headers"
         );
 
-        let subject = Self::get_header(hdrs, "Subject")
-            .unwrap_or("")
-            .to_string();
+        let subject = Self::get_header(hdrs, "Subject").unwrap_or("").to_string();
         let from_raw = Self::get_header(hdrs, "From").unwrap_or("");
         let (from_name, from_address) = parse_email_header(from_raw);
         let to_raw = Self::get_header(hdrs, "To").unwrap_or("");
@@ -443,10 +443,12 @@ impl GmailProvider {
         let is_draft = label_ids.iter().any(|l| l == "DRAFT");
 
         // Extract body content from payload
-        let (body_text, body_html_raw) = payload
-            .map(extract_body_parts)
-            .unwrap_or_default();
-        let has_attachments = gm.payload.as_ref().map(has_attachment_parts).unwrap_or(false);
+        let (body_text, body_html_raw) = payload.map(extract_body_parts).unwrap_or_default();
+        let has_attachments = gm
+            .payload
+            .as_ref()
+            .map(has_attachment_parts)
+            .unwrap_or(false);
 
         debug!(
             gmail_id = %gm.id,
@@ -497,7 +499,11 @@ impl GmailProvider {
 #[async_trait]
 impl MailTransport for GmailProvider {
     async fn authenticate(&mut self, credentials: &AuthCredentials) -> Result<()> {
-        if let Some(token) = credentials.data.get("access_token").and_then(|v| v.as_str()) {
+        if let Some(token) = credentials
+            .data
+            .get("access_token")
+            .and_then(|v| v.as_str())
+        {
             self.set_access_token(token.to_string());
         }
         // Verify by making a profile request
@@ -556,10 +562,7 @@ impl MailTransport for GmailProvider {
     }
 
     async fn sync_changes(&self, since: &SyncCursor) -> Result<ChangeSet> {
-        let url = format!(
-            "{GMAIL_API_BASE}/history?startHistoryId={}",
-            since.value
-        );
+        let url = format!("{GMAIL_API_BASE}/history?startHistoryId={}", since.value);
         let resp = self.get(&url).await?;
         let history: GmailHistoryList = resp
             .json()
@@ -913,7 +916,11 @@ fn write_common_headers(
 
     let to = to.iter().map(format_address).collect::<Vec<_>>().join(", ");
     let cc = cc.iter().map(format_address).collect::<Vec<_>>().join(", ");
-    let bcc = bcc.iter().map(format_address).collect::<Vec<_>>().join(", ");
+    let bcc = bcc
+        .iter()
+        .map(format_address)
+        .collect::<Vec<_>>()
+        .join(", ");
 
     raw.push_str(&format!("To: {to}\r\n"));
     raw.push_str(&format!("Subject: {subject}\r\n"));
@@ -1263,8 +1270,7 @@ fn collect_attachment_parts(payload: &GmailPayload) -> Result<Vec<AttachmentData
 /// Base64url encoding without padding (RFC 4648 section 5).
 /// Implemented inline to avoid adding a `base64` crate dependency.
 fn base64url_encode(data: &[u8]) -> String {
-    const ALPHABET: &[u8; 64] =
-        b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
 
     let mut result = String::with_capacity(data.len().div_ceil(3) * 4);
     let chunks = data.chunks(3);

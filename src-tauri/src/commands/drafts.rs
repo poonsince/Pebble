@@ -80,9 +80,27 @@ pub async fn save_draft(
     )?;
     let draft = DraftMessage {
         id: existing_draft_id.clone(),
-        to: to.into_iter().map(|a| EmailAddress { name: None, address: a }).collect(),
-        cc: cc.into_iter().map(|a| EmailAddress { name: None, address: a }).collect(),
-        bcc: bcc.into_iter().map(|a| EmailAddress { name: None, address: a }).collect(),
+        to: to
+            .into_iter()
+            .map(|a| EmailAddress {
+                name: None,
+                address: a,
+            })
+            .collect(),
+        cc: cc
+            .into_iter()
+            .map(|a| EmailAddress {
+                name: None,
+                address: a,
+            })
+            .collect(),
+        bcc: bcc
+            .into_iter()
+            .map(|a| EmailAddress {
+                name: None,
+                address: a,
+            })
+            .collect(),
         subject,
         body_text,
         body_html,
@@ -90,8 +108,7 @@ pub async fn save_draft(
         attachment_paths,
     };
 
-    let provider_type = state.store.get_account(&account_id)?
-        .map(|a| a.provider);
+    let provider_type = state.store.get_account(&account_id)?.map(|a| a.provider);
 
     match provider_type {
         Some(pt) => {
@@ -160,11 +177,16 @@ fn save_draft_locally(
     // shows up in the Drafts view. Falls back to no-folder for accounts
     // without a Drafts folder (e.g. brand-new IMAP account that hasn't yet
     // synced folder structure).
-    let folder_ids: Vec<String> = match state.store.find_folder_by_role(account_id, FolderRole::Drafts) {
+    let folder_ids: Vec<String> = match state
+        .store
+        .find_folder_by_role(account_id, FolderRole::Drafts)
+    {
         Ok(Some(f)) => vec![f.id],
         _ => Vec::new(),
     };
-    state.store.replace_message_with_attachments(&msg, &folder_ids, &attachment_records)?;
+    state
+        .store
+        .replace_message_with_attachments(&msg, &folder_ids, &attachment_records)?;
     Ok(id)
 }
 
@@ -177,7 +199,9 @@ fn draft_attachment_records(draft_id: &str, attachment_paths: &[String]) -> Vec<
                 .and_then(|name| name.to_str())
                 .unwrap_or("attachment")
                 .to_string();
-            let size = std::fs::metadata(path).map(|metadata| metadata.len() as i64).unwrap_or(0);
+            let size = std::fs::metadata(path)
+                .map(|metadata| metadata.len() as i64)
+                .unwrap_or(0);
             Attachment {
                 id: pebble_core::new_id(),
                 message_id: draft_id.to_string(),
@@ -236,9 +260,7 @@ mod tests {
         requires_remote_draft_delete, should_delete_local_draft,
         validate_existing_local_draft_account,
     };
-    use pebble_core::{
-        new_id, now_timestamp, Account, Message, PebbleError, ProviderType,
-    };
+    use pebble_core::{new_id, now_timestamp, Account, Message, PebbleError, ProviderType};
     use pebble_store::Store;
 
     fn make_account(id: &str, email: &str) -> Account {
@@ -306,7 +328,10 @@ mod tests {
     #[test]
     fn draft_delete_local_decision_requires_remote_confirmation_for_oauth_providers() {
         assert!(!should_delete_local_draft(Some(ProviderType::Gmail), false));
-        assert!(!should_delete_local_draft(Some(ProviderType::Outlook), false));
+        assert!(!should_delete_local_draft(
+            Some(ProviderType::Outlook),
+            false
+        ));
         assert!(should_delete_local_draft(Some(ProviderType::Gmail), true));
         assert!(should_delete_local_draft(Some(ProviderType::Outlook), true));
     }
@@ -322,9 +347,8 @@ mod tests {
         let draft = make_draft(&account_a.id, &draft_id);
         store.insert_message(&draft, &[]).unwrap();
 
-        let err =
-            validate_existing_local_draft_account(&store, &account_b.id, Some(&draft_id))
-                .unwrap_err();
+        let err = validate_existing_local_draft_account(&store, &account_b.id, Some(&draft_id))
+            .unwrap_err();
 
         assert!(matches!(err, PebbleError::Validation(_)));
     }
@@ -345,7 +369,6 @@ mod tests {
     fn existing_local_draft_validation_allows_missing_local_record() {
         let store = Store::open_in_memory().unwrap();
 
-        validate_existing_local_draft_account(&store, "account-a", Some("remote-draft-1"))
-            .unwrap();
+        validate_existing_local_draft_account(&store, "account-a", Some("remote-draft-1")).unwrap();
     }
 }

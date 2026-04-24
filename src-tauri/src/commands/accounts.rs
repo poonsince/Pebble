@@ -14,10 +14,142 @@ use tauri::State;
 /// mutations, which silently dropped fields when serde and JSON shapes
 /// drifted. Parsing into this struct makes the shape explicit and reuses
 /// `ImapConfig` / `SmtpConfig`'s own legacy-aware deserializers.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 struct AccountCredentials {
     imap: ImapConfig,
     smtp: SmtpConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct StoredAccountCredentials {
+    imap: StoredMailConfig,
+    smtp: StoredMailConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct StoredMailConfig {
+    host: String,
+    port: u16,
+    username: String,
+    #[serde(default)]
+    password: String,
+    #[serde(default)]
+    security: Option<ConnectionSecurity>,
+    #[serde(default)]
+    use_tls: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    proxy: Option<ProxyConfig>,
+}
+
+impl StoredMailConfig {
+    fn security(&self) -> ConnectionSecurity {
+        self.security.clone().unwrap_or(match self.use_tls {
+            Some(false) => ConnectionSecurity::Plain,
+            _ => ConnectionSecurity::Tls,
+        })
+    }
+
+    fn into_imap(self) -> ImapConfig {
+        let security = self.security();
+        ImapConfig {
+            host: self.host,
+            port: self.port,
+            username: self.username,
+            password: self.password,
+            security,
+            proxy: self.proxy,
+        }
+    }
+
+    fn into_smtp(self) -> SmtpConfig {
+        let security = self.security();
+        SmtpConfig {
+            host: self.host,
+            port: self.port,
+            username: self.username,
+            password: self.password,
+            security,
+            proxy: self.proxy,
+        }
+    }
+}
+
+impl From<&ImapConfig> for StoredMailConfig {
+    fn from(value: &ImapConfig) -> Self {
+        Self {
+            host: value.host.clone(),
+            port: value.port,
+            username: value.username.clone(),
+            password: value.password.clone(),
+            security: Some(value.security.clone()),
+            use_tls: None,
+            proxy: value.proxy.clone(),
+        }
+    }
+}
+
+impl From<&SmtpConfig> for StoredMailConfig {
+    fn from(value: &SmtpConfig) -> Self {
+        Self {
+            host: value.host.clone(),
+            port: value.port,
+            username: value.username.clone(),
+            password: value.password.clone(),
+            security: Some(value.security.clone()),
+            use_tls: None,
+            proxy: value.proxy.clone(),
+        }
+    }
+}
+
+impl From<&AccountCredentials> for StoredAccountCredentials {
+    fn from(value: &AccountCredentials) -> Self {
+        Self {
+            imap: StoredMailConfig::from(&value.imap),
+            smtp: StoredMailConfig::from(&value.smtp),
+        }
+    }
+}
+
+impl From<StoredAccountCredentials> for AccountCredentials {
+    fn from(value: StoredAccountCredentials) -> Self {
+        Self {
+            imap: value.imap.into_imap(),
+            smtp: value.smtp.into_smtp(),
+        }
+    }
+}
+
+impl Serialize for AccountCredentials {
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        StoredAccountCredentials::from(self).serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for AccountCredentials {
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        StoredAccountCredentials::deserialize(deserializer).map(Into::into)
+    }
+}
+
+fn serialize_account_credentials(
+    credentials: &AccountCredentials,
+) -> std::result::Result<Vec<u8>, PebbleError> {
+    serde_json::to_vec(credentials)
+        .map_err(|e| PebbleError::Internal(format!("Failed to serialize config: {e}")))
+}
+
+fn deserialize_account_credentials(
+    bytes: &[u8],
+) -> std::result::Result<AccountCredentials, PebbleError> {
+    serde_json::from_slice(bytes)
+        .map_err(|e| PebbleError::Internal(format!("Failed to parse config: {e}")))
 }
 
 fn is_loopback_mail_host(host: &str) -> bool {
@@ -128,8 +260,7 @@ pub async fn add_account(
         };
 
         // Encrypt credentials and store as auth_data
-        let config_bytes = serde_json::to_vec(&credentials)
-            .map_err(|e| PebbleError::Internal(format!("Failed to serialize config: {e}")))?;
+        let config_bytes = serialize_account_credentials(&credentials)?;
         let encrypted = state.crypto.encrypt(&config_bytes)?;
         state.store.set_auth_data(&account.id, &encrypted)?;
 
@@ -190,8 +321,7 @@ pub async fn update_account(
     let mut creds: AccountCredentials = match state.store.get_auth_data(&account_id)? {
         Some(encrypted) => {
             let decrypted = state.crypto.decrypt(&encrypted)?;
-            serde_json::from_slice(&decrypted)
-                .map_err(|e| PebbleError::Internal(format!("Failed to parse config: {e}")))?
+            deserialize_account_credentials(&decrypted)?
         }
         None => AccountCredentials {
             imap: ImapConfig {
@@ -267,8 +397,7 @@ pub async fn update_account(
         .store
         .update_account(&account_id, &email, &display_name)?;
 
-    let config_bytes = serde_json::to_vec(&creds)
-        .map_err(|e| PebbleError::Internal(format!("Failed to serialize config: {e}")))?;
+    let config_bytes = serialize_account_credentials(&creds)?;
     let encrypted = state.crypto.encrypt(&config_bytes)?;
     state.store.set_auth_data(&account_id, &encrypted)?;
 
@@ -445,5 +574,33 @@ mod tests {
             .expect("localhost plaintext is useful for local test servers");
         validate_connection_security("SMTP", "127.0.0.1", &ConnectionSecurity::Plain)
             .expect("loopback plaintext is useful for local test servers");
+    }
+
+    #[test]
+    fn account_credentials_storage_round_trip_preserves_passwords() {
+        let credentials = AccountCredentials {
+            imap: ImapConfig {
+                host: "imap.example.com".to_string(),
+                port: 993,
+                username: "user@example.com".to_string(),
+                password: "imap-secret".to_string(),
+                security: ConnectionSecurity::Tls,
+                proxy: None,
+            },
+            smtp: SmtpConfig {
+                host: "smtp.example.com".to_string(),
+                port: 465,
+                username: "user@example.com".to_string(),
+                password: "smtp-secret".to_string(),
+                security: ConnectionSecurity::Tls,
+                proxy: None,
+            },
+        };
+
+        let bytes = serialize_account_credentials(&credentials).unwrap();
+        let decoded: AccountCredentials = serde_json::from_slice(&bytes).unwrap();
+
+        assert_eq!(decoded.imap.password, "imap-secret");
+        assert_eq!(decoded.smtp.password, "smtp-secret");
     }
 }

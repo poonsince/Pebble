@@ -92,7 +92,11 @@ impl Store {
         })
     }
 
-    pub fn find_folder_by_role(&self, account_id: &str, role: FolderRole) -> Result<Option<Folder>> {
+    pub fn find_folder_by_role(
+        &self,
+        account_id: &str,
+        role: FolderRole,
+    ) -> Result<Option<Folder>> {
         let role_str = folder_role_to_str(&role);
         self.with_read(|conn| {
             let mut stmt = conn

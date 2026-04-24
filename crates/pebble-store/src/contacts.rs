@@ -16,29 +16,30 @@ impl Store {
         limit: i64,
     ) -> Result<Vec<KnownContact>> {
         self.with_read(|conn| {
-            let escaped = query.replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_");
+            let escaped = query
+                .replace('\\', "\\\\")
+                .replace('%', "\\%")
+                .replace('_', "\\_");
             let pattern = format!("%{}%", escaped);
 
             // First: collect contacts from from_address / from_name columns
-            let mut stmt = conn
-                .prepare(
-                    "SELECT DISTINCT from_name, from_address
+            let mut stmt = conn.prepare(
+                "SELECT DISTINCT from_name, from_address
                      FROM messages
                      WHERE account_id = ?1
                        AND is_deleted = 0
                        AND (from_address LIKE ?2 ESCAPE '\\' OR from_name LIKE ?2 ESCAPE '\\')
                      LIMIT ?3",
-                )?;
+            )?;
 
-            let from_rows = stmt
-                .query_map(params![account_id, pattern, limit], |row| {
-                    let name: String = row.get(0)?;
-                    let address: String = row.get(1)?;
-                    Ok(KnownContact {
-                        name: if name.is_empty() { None } else { Some(name) },
-                        address,
-                    })
-                })?;
+            let from_rows = stmt.query_map(params![account_id, pattern, limit], |row| {
+                let name: String = row.get(0)?;
+                let address: String = row.get(1)?;
+                Ok(KnownContact {
+                    name: if name.is_empty() { None } else { Some(name) },
+                    address,
+                })
+            })?;
 
             let mut seen = std::collections::HashSet::new();
             let mut contacts = Vec::new();
@@ -54,15 +55,14 @@ impl Store {
             // Second: search inside to_list JSON for matching recipients
             if (contacts.len() as i64) < limit {
                 let remaining = limit - contacts.len() as i64;
-                let mut stmt2 = conn
-                    .prepare(
-                        "SELECT DISTINCT to_list
+                let mut stmt2 = conn.prepare(
+                    "SELECT DISTINCT to_list
                          FROM messages
                          WHERE account_id = ?1
                            AND is_deleted = 0
                            AND to_list LIKE ?2 ESCAPE '\\'
                          LIMIT ?3",
-                    )?;
+                )?;
 
                 let to_rows = stmt2
                     .query_map(params![account_id, pattern, remaining * 5], |row| {
@@ -231,7 +231,9 @@ mod tests {
     #[test]
     fn test_list_known_contacts_broad_query() {
         let (store, account_id) = setup_store_with_contacts();
-        let results = store.list_known_contacts(&account_id, "example", 10).unwrap();
+        let results = store
+            .list_known_contacts(&account_id, "example", 10)
+            .unwrap();
         // alice@example.com from from_address, bob@example.com from to_list, me@example.com from to_list
         assert!(results.len() >= 2);
     }
@@ -254,7 +256,9 @@ mod tests {
     #[test]
     fn test_list_known_contacts_no_match() {
         let (store, account_id) = setup_store_with_contacts();
-        let results = store.list_known_contacts(&account_id, "zzzznotfound", 10).unwrap();
+        let results = store
+            .list_known_contacts(&account_id, "zzzznotfound", 10)
+            .unwrap();
         assert!(results.is_empty());
     }
 }

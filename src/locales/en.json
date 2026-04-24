@@ -4,6 +4,7 @@
     "noMessages": "No messages",
     "noThreads": "No threads",
     "messageNotFound": "Message not found",
+    "messageLoadFailed": "Failed to load message",
     "save": "Save",
     "cancel": "Cancel",
     "delete": "Delete",
@@ -230,7 +231,8 @@
       "delete": "Delete",
       "delete_permanent": "Delete permanently",
       "update_flags": "Update flags",
-      "move_to_folder": "Move to folder"
+      "move_to_folder": "Move to folder",
+      "send": "Send"
     }
   },
   "about": {

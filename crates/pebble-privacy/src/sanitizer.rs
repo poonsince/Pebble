@@ -128,10 +128,45 @@ fn build_sanitizer(_mode: &PrivacyMode) -> Builder<'static> {
 
     // Allow safe tags for email HTML
     let tags: HashSet<&'static str> = [
-        "a", "abbr", "b", "blockquote", "br", "code", "dd", "div", "dl", "dt", "em", "h1",
-        "h2", "h3", "h4", "h5", "h6", "hr", "i", "img", "li", "ol", "p", "pre", "s", "span",
-        "strong", "sub", "sup", "table", "tbody", "td", "th", "thead", "tr", "u", "ul",
-        "center", "font",
+        "a",
+        "abbr",
+        "b",
+        "blockquote",
+        "br",
+        "code",
+        "dd",
+        "div",
+        "dl",
+        "dt",
+        "em",
+        "h1",
+        "h2",
+        "h3",
+        "h4",
+        "h5",
+        "h6",
+        "hr",
+        "i",
+        "img",
+        "li",
+        "ol",
+        "p",
+        "pre",
+        "s",
+        "span",
+        "strong",
+        "sub",
+        "sup",
+        "table",
+        "tbody",
+        "td",
+        "th",
+        "thead",
+        "tr",
+        "u",
+        "ul",
+        "center",
+        "font",
     ]
     .iter()
     .copied()
@@ -144,7 +179,10 @@ fn build_sanitizer(_mode: &PrivacyMode) -> Builder<'static> {
         [
             (
                 "a",
-                ["href", "title", "target"].iter().copied().collect::<HashSet<_>>(),
+                ["href", "title", "target"]
+                    .iter()
+                    .copied()
+                    .collect::<HashSet<_>>(),
             ),
             (
                 "img",
@@ -176,11 +214,17 @@ fn build_sanitizer(_mode: &PrivacyMode) -> Builder<'static> {
             ),
             (
                 "font",
-                ["color", "size", "face"].iter().copied().collect::<HashSet<_>>(),
+                ["color", "size", "face"]
+                    .iter()
+                    .copied()
+                    .collect::<HashSet<_>>(),
             ),
             (
                 "div",
-                ["class", "data-src"].iter().copied().collect::<HashSet<_>>(),
+                ["class", "data-src"]
+                    .iter()
+                    .copied()
+                    .collect::<HashSet<_>>(),
             ),
             (
                 "blockquote",
@@ -319,9 +363,7 @@ fn process_img_tag(
 
     // Tracking pixels are always blocked
     if is_tracking_pixel(width, height) {
-        let domain = src
-            .and_then(extract_domain_from_url)
-            .unwrap_or_default();
+        let domain = src.and_then(extract_domain_from_url).unwrap_or_default();
         trackers_blocked.push(TrackerInfo {
             domain,
             tracker_type: "pixel".to_string(),
@@ -359,7 +401,6 @@ fn process_img_tag(
     ImgAction::Keep
 }
 
-
 /// Extract the domain from a URL, stripping protocol and path.
 fn extract_domain_from_url(url: &str) -> Option<String> {
     let without_protocol = url
@@ -367,7 +408,10 @@ fn extract_domain_from_url(url: &str) -> Option<String> {
         .or_else(|| url.strip_prefix("http://"))
         .unwrap_or(url);
 
-    let domain = without_protocol.split('/').next().unwrap_or(without_protocol);
+    let domain = without_protocol
+        .split('/')
+        .next()
+        .unwrap_or(without_protocol);
     if domain.is_empty() {
         None
     } else {
@@ -538,7 +582,11 @@ mod tests {
         let html = r#"<p>Before</p><img alt="hi>there" src="https://tracking.mailchimp.com/open.gif" width="100" height="50"><p>After</p>"#;
         let result = guard.render_safe_html(html, &PrivacyMode::Strict);
         // Tracker must be detected and the src must not survive in output.
-        assert!(!result.html.contains("mailchimp.com"), "tracker src leaked: {}", result.html);
+        assert!(
+            !result.html.contains("mailchimp.com"),
+            "tracker src leaked: {}",
+            result.html
+        );
         assert_eq!(result.trackers_blocked.len(), 1);
     }
 
@@ -549,7 +597,15 @@ mod tests {
         let guard = PrivacyGuard::new();
         let html = r#"<img data-src="https://example.com/local.jpg" src="https://tracking.mailchimp.com/open.gif" width="100" height="50">"#;
         let result = guard.render_safe_html(html, &PrivacyMode::Strict);
-        assert!(!result.html.contains("mailchimp.com"), "tracker leaked: {}", result.html);
-        assert_eq!(result.trackers_blocked.len(), 1, "expected real src to be detected");
+        assert!(
+            !result.html.contains("mailchimp.com"),
+            "tracker leaked: {}",
+            result.html
+        );
+        assert_eq!(
+            result.trackers_blocked.len(),
+            1,
+            "expected real src to be detected"
+        );
     }
 }

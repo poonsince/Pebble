@@ -4,6 +4,7 @@
     "noMessages": "暂无邮件",
     "noThreads": "暂无会话",
     "messageNotFound": "邮件未找到",
+    "messageLoadFailed": "加载邮件失败",
     "save": "保存",
     "cancel": "取消",
     "delete": "删除",
@@ -230,7 +231,8 @@
       "delete": "删除",
       "delete_permanent": "永久删除",
       "update_flags": "更新标记",
-      "move_to_folder": "移动到文件夹"
+      "move_to_folder": "移动到文件夹",
+      "send": "发送"
     }
   },
   "about": {

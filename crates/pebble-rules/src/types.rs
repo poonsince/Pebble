@@ -5,8 +5,8 @@
 //! other will silently drop rules at load. Fix both sides together; a
 //! shared ts-rs-generated binding is tracked as future work.
 
-use serde::{Deserialize, Serialize};
 use pebble_core::KanbanColumn;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RuleConditionSet {

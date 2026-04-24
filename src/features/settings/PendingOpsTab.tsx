@@ -102,6 +102,7 @@ export default function PendingOpsTab() {
       delete_permanent: "Delete permanently",
       update_flags: "Update flags",
       move_to_folder: "Move to folder",
+      send: "Send",
     };
     return t(key, fallbacks[opType] ?? opType);
   }

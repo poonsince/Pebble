@@ -53,11 +53,9 @@ pub async fn is_trusted_sender(
     email: String,
 ) -> std::result::Result<bool, PebbleError> {
     let store = state.store.clone();
-    tokio::task::spawn_blocking(move || {
-        Ok(store.is_trusted_sender(&account_id, &email)?.is_some())
-    })
-    .await
-    .map_err(|e| PebbleError::Internal(format!("Task join error: {e}")))?
+    tokio::task::spawn_blocking(move || Ok(store.is_trusted_sender(&account_id, &email)?.is_some()))
+        .await
+        .map_err(|e| PebbleError::Internal(format!("Task join error: {e}")))?
 }
 
 fn resolve_privacy_mode(

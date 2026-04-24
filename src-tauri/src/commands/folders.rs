@@ -1,5 +1,5 @@
 use crate::state::AppState;
-use pebble_core::{Folder, FolderRole, FolderType, PebbleError, new_id};
+use pebble_core::{new_id, Folder, FolderRole, FolderType, PebbleError};
 use tauri::State;
 
 #[tauri::command]

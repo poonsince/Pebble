@@ -178,8 +178,8 @@ pub fn build_schema() -> SearchSchema {
     let from_name = builder.add_text_field("from_name", ngram_stored);
     let to_addresses = builder.add_text_field("to_addresses", ngram_only);
 
-    let date_options = DateOptions::from(INDEXED | STORED)
-        .set_precision(DateTimePrecision::Seconds);
+    let date_options =
+        DateOptions::from(INDEXED | STORED).set_precision(DateTimePrecision::Seconds);
     let date = builder.add_date_field("date", date_options);
 
     let folder_id = builder.add_text_field("folder_id", STRING);
@@ -205,8 +205,7 @@ pub fn build_schema() -> SearchSchema {
 
 /// Register custom tokenizers on the index. Must be called after index creation.
 pub fn register_tokenizers(index: &Index) {
-    let ngram = TextAnalyzer::builder(NgramTokenizer::new(2, 3, false).unwrap())
-        .build();
+    let ngram = TextAnalyzer::builder(NgramTokenizer::new(2, 3, false).unwrap()).build();
     index.tokenizers().register(NGRAM_TOKENIZER, ngram);
 
     let body = TextAnalyzer::builder(CjkAwareTokenizer).build();

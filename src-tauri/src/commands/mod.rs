@@ -1,12 +1,12 @@
 pub mod accounts;
 pub mod advanced_search;
-pub mod drafts;
-pub mod folder_counts;
 pub mod attachments;
 pub mod batch;
 pub mod cloud_sync;
 pub mod compose;
 pub mod contacts;
+pub mod drafts;
+pub mod folder_counts;
 pub mod folders;
 pub mod gmail_labels;
 pub mod health;

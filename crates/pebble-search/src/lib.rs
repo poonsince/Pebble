@@ -3,23 +3,20 @@ pub mod schema;
 use std::path::Path;
 use std::sync::Mutex;
 
-use pebble_core::{Message, PebbleError, Result};
 use pebble_core::traits::SearchHit;
+use pebble_core::{Message, PebbleError, Result};
 use tantivy::collector::TopDocs;
 use tantivy::query::{BooleanQuery, Occur, Query, QueryParser, RangeQuery, TermQuery};
-use tantivy::schema::Value;
 use tantivy::schema::Schema;
-use tantivy::{DateTime, Index, IndexWriter, ReloadPolicy, Term, TantivyDocument};
+use tantivy::schema::Value;
+use tantivy::{DateTime, Index, IndexWriter, ReloadPolicy, TantivyDocument, Term};
 
 use schema::{build_schema, SearchSchema};
 
 const SNIPPET_MAX_LEN: usize = 150;
 
 fn make_snippet(doc: &TantivyDocument, field: tantivy::schema::Field) -> String {
-    let body = doc
-        .get_first(field)
-        .and_then(|v| v.as_str())
-        .unwrap_or("");
+    let body = doc.get_first(field).and_then(|v| v.as_str()).unwrap_or("");
     if body.len() > SNIPPET_MAX_LEN {
         format!("{}…", &body[..body.floor_char_boundary(SNIPPET_MAX_LEN)])
     } else {
@@ -79,7 +76,9 @@ impl TantivySearch {
                                 match entry.field_type() {
                                     tantivy::schema::FieldType::Str(text_opts) => {
                                         match text_opts.get_indexing_options() {
-                                            Some(idx_opts) => idx_opts.tokenizer() != schema::BODY_TOKENIZER,
+                                            Some(idx_opts) => {
+                                                idx_opts.tokenizer() != schema::BODY_TOKENIZER
+                                            }
                                             None => true,
                                         }
                                     }
@@ -222,7 +221,9 @@ impl TantivySearch {
             doc.add_text(ss.from_address, &msg.from_address);
             doc.add_text(ss.from_name, &msg.from_name);
 
-            let to_text: Vec<String> = msg.to_list.iter()
+            let to_text: Vec<String> = msg
+                .to_list
+                .iter()
                 .chain(msg.cc_list.iter())
                 .chain(msg.bcc_list.iter())
                 .map(|ea| match &ea.name {
@@ -236,10 +237,14 @@ impl TantivySearch {
                 doc.add_text(ss.folder_id, fid);
             }
             doc.add_text(ss.account_id, &msg.account_id);
-            doc.add_text(ss.has_attachment, if msg.has_attachments { "true" } else { "false" });
+            doc.add_text(
+                ss.has_attachment,
+                if msg.has_attachments { "true" } else { "false" },
+            );
 
             writer.delete_term(Term::from_field_text(ss.message_id, &msg.id));
-            writer.add_document(doc)
+            writer
+                .add_document(doc)
                 .map_err(|e| PebbleError::Internal(format!("Failed to add document: {e}")))?;
         }
         Ok(())
@@ -321,9 +326,18 @@ impl TantivySearch {
 
             let snippet = make_snippet(&doc, ss.body_text);
 
-            let subject = doc.get_first(ss.subject).and_then(|v| v.as_str()).map(|s| s.to_string());
-            let from_address = doc.get_first(ss.from_address).and_then(|v| v.as_str()).map(|s| s.to_string());
-            let date = doc.get_first(ss.date).and_then(|v| v.as_datetime()).map(|dt| dt.into_timestamp_secs());
+            let subject = doc
+                .get_first(ss.subject)
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string());
+            let from_address = doc
+                .get_first(ss.from_address)
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string());
+            let date = doc
+                .get_first(ss.date)
+                .and_then(|v| v.as_datetime())
+                .map(|dt| dt.into_timestamp_secs());
 
             hits.push(SearchHit {
                 message_id,
@@ -338,11 +352,18 @@ impl TantivySearch {
         Ok(hits)
     }
 
-    pub fn advanced_search(
-        &self,
-        params: AdvancedSearchParams<'_>,
-    ) -> Result<Vec<SearchHit>> {
-        let AdvancedSearchParams { text, from, to, subject, date_from, date_to, has_attachment, folder_id, limit } = params;
+    pub fn advanced_search(&self, params: AdvancedSearchParams<'_>) -> Result<Vec<SearchHit>> {
+        let AdvancedSearchParams {
+            text,
+            from,
+            to,
+            subject,
+            date_from,
+            date_to,
+            has_attachment,
+            folder_id,
+            limit,
+        } = params;
         let ss = &self.schema;
 
         let searcher = self.reader.searcher();
@@ -350,12 +371,13 @@ impl TantivySearch {
         let mut sub_queries: Vec<(Occur, Box<dyn Query>)> = Vec::new();
 
         // Helper: parse a text query against specific fields
-        let parse_text_query = |fields: Vec<tantivy::schema::Field>, q: &str| -> Result<Box<dyn Query>> {
-            let parser = QueryParser::for_index(&self.index, fields);
-            parser
-                .parse_query(q)
-                .map_err(|e| PebbleError::Internal(format!("Failed to parse query: {e}")))
-        };
+        let parse_text_query =
+            |fields: Vec<tantivy::schema::Field>, q: &str| -> Result<Box<dyn Query>> {
+                let parser = QueryParser::for_index(&self.index, fields);
+                parser
+                    .parse_query(q)
+                    .map_err(|e| PebbleError::Internal(format!("Failed to parse query: {e}")))
+            };
 
         if let Some(q) = text {
             if !q.is_empty() {
@@ -447,9 +469,18 @@ impl TantivySearch {
 
             let snippet = make_snippet(&doc, ss.body_text);
 
-            let subject = doc.get_first(ss.subject).and_then(|v| v.as_str()).map(|s| s.to_string());
-            let from_address = doc.get_first(ss.from_address).and_then(|v| v.as_str()).map(|s| s.to_string());
-            let date = doc.get_first(ss.date).and_then(|v| v.as_datetime()).map(|dt| dt.into_timestamp_secs());
+            let subject = doc
+                .get_first(ss.subject)
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string());
+            let from_address = doc
+                .get_first(ss.from_address)
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string());
+            let date = doc
+                .get_first(ss.date)
+                .and_then(|v| v.as_datetime())
+                .map(|dt| dt.into_timestamp_secs());
 
             hits.push(SearchHit {
                 message_id,
@@ -573,7 +604,10 @@ mod tests {
         engine.commit().unwrap();
 
         let hits = engine.search("wonderland", 10).unwrap();
-        assert!(!hits.is_empty(), "expected from_address search to find the message");
+        assert!(
+            !hits.is_empty(),
+            "expected from_address search to find the message"
+        );
         assert_eq!(hits[0].message_id, "msg-3");
     }
 
@@ -618,19 +652,16 @@ mod tests {
     #[test]
     fn test_reindex_same_message_replaces_old_document() {
         let engine = TantivySearch::open_in_memory().unwrap();
-        let mut msg = make_test_message(
-            "msg-6",
-            "Old subject",
-            "old body",
-            "sender@example.com",
-        );
+        let mut msg = make_test_message("msg-6", "Old subject", "old body", "sender@example.com");
 
         engine.index_message(&msg, &["inbox".to_string()]).unwrap();
         engine.commit().unwrap();
 
         msg.subject = "New subject".to_string();
         msg.body_text = "new body".to_string();
-        engine.index_message(&msg, &["archive".to_string()]).unwrap();
+        engine
+            .index_message(&msg, &["archive".to_string()])
+            .unwrap();
         engine.commit().unwrap();
 
         let old_hits = engine.search("Old", 10).unwrap();
@@ -652,7 +683,10 @@ mod tests {
                 limit: 10,
             })
             .unwrap();
-        assert!(inbox_hits.is_empty(), "expected old folder mapping to be replaced");
+        assert!(
+            inbox_hits.is_empty(),
+            "expected old folder mapping to be replaced"
+        );
     }
 
     #[test]
@@ -668,11 +702,17 @@ mod tests {
         engine.commit().unwrap();
 
         let hits = engine.search("前端界面", 10).unwrap();
-        assert!(!hits.is_empty(), "expected CJK body search to find the message");
+        assert!(
+            !hits.is_empty(),
+            "expected CJK body search to find the message"
+        );
         assert_eq!(hits[0].message_id, "msg-cjk-1");
 
         let hits2 = engine.search("项目进度", 10).unwrap();
-        assert!(!hits2.is_empty(), "expected CJK subject search to find the message");
+        assert!(
+            !hits2.is_empty(),
+            "expected CJK subject search to find the message"
+        );
     }
 
     #[test]
@@ -705,11 +745,26 @@ mod tests {
         let engine = TantivySearch::open_in_memory().unwrap();
 
         // Index two messages for account-1 with unique subject/body terms
-        let msg1 = make_test_message("msg-del-1", "Zephyr quarterly report", "zephyr financials here", "a@example.com");
-        let msg2 = make_test_message("msg-del-2", "Zephyr project update", "zephyr milestone reached", "b@example.com");
+        let msg1 = make_test_message(
+            "msg-del-1",
+            "Zephyr quarterly report",
+            "zephyr financials here",
+            "a@example.com",
+        );
+        let msg2 = make_test_message(
+            "msg-del-2",
+            "Zephyr project update",
+            "zephyr milestone reached",
+            "b@example.com",
+        );
 
         // Index one message for account-2 with different unique terms
-        let mut msg3 = make_test_message("msg-del-3", "Pinnacle strategy memo", "pinnacle roadmap details", "c@example.com");
+        let mut msg3 = make_test_message(
+            "msg-del-3",
+            "Pinnacle strategy memo",
+            "pinnacle roadmap details",
+            "c@example.com",
+        );
         msg3.account_id = "account-2".to_string();
 
         engine.index_message(&msg1, &["inbox".to_string()]).unwrap();
@@ -724,15 +779,26 @@ mod tests {
         engine.delete_by_account("account-1").unwrap();
 
         // doc_count should drop to 1 (only account-2 message remains)
-        assert_eq!(engine.doc_count(), 1, "expected two documents removed, one remaining");
+        assert_eq!(
+            engine.doc_count(),
+            1,
+            "expected two documents removed, one remaining"
+        );
 
         // account-1 messages should be gone — search for unique term "zephyr"
         let hits_a = engine.search("zephyr", 10).unwrap();
-        assert!(hits_a.is_empty(), "expected account-1 messages to be removed from index");
+        assert!(
+            hits_a.is_empty(),
+            "expected account-1 messages to be removed from index"
+        );
 
         // account-2 message should still be present — search for unique term "pinnacle"
         let hits_c = engine.search("pinnacle", 10).unwrap();
-        assert_eq!(hits_c.len(), 1, "expected account-2 message to remain in index");
+        assert_eq!(
+            hits_c.len(),
+            1,
+            "expected account-2 message to remain in index"
+        );
         assert_eq!(hits_c[0].message_id, "msg-del-3");
     }
 
@@ -765,7 +831,10 @@ mod tests {
                 limit: 10,
             })
             .unwrap();
-        assert!(!hits.is_empty(), "expected CC recipient to be searchable via to filter");
+        assert!(
+            !hits.is_empty(),
+            "expected CC recipient to be searchable via to filter"
+        );
         assert_eq!(hits[0].message_id, "msg-cc");
     }
 }

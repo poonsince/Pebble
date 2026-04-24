@@ -1,4 +1,4 @@
-import { render, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
@@ -23,11 +23,18 @@ const mocks = vi.hoisted(() => ({
     in_progress_count: 0,
     last_error: null as string | null,
   },
+  syncMutateAsync: vi.fn(() => Promise.resolve()),
 }));
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
-    t: (_key: string, fallback?: string) => fallback ?? _key,
+    t: (key: string, fallback?: string) => {
+      const labels: Record<string, string> = {
+        "status.syncNow": "Sync now",
+        "status.stopSync": "Stop sync",
+      };
+      return labels[key] ?? fallback ?? key;
+    },
   }),
 }));
 
@@ -54,7 +61,7 @@ vi.mock("../../src/stores/mail.store", () => ({
 
 vi.mock("../../src/hooks/mutations/useSyncMutation", () => ({
   useSyncMutation: () => ({
-    mutateAsync: vi.fn(),
+    mutateAsync: mocks.syncMutateAsync,
   }),
 }));
 
@@ -75,6 +82,8 @@ describe("StatusBar realtime mail events", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.listeners.clear();
+    mocks.uiState.syncStatus = "idle";
+    mocks.mailState.activeAccountId = "account-1";
   });
 
   it("invalidates message, thread, and account folder queries for new mail", async () => {
@@ -116,5 +125,15 @@ describe("StatusBar realtime mail events", () => {
     render(<StatusBar />);
 
     expect(document.body.textContent).toContain("Manual only");
+  });
+
+  it("returns the status to idle after a manual sync request is accepted", async () => {
+    render(<StatusBar />);
+
+    fireEvent.click(screen.getByLabelText("Sync now"));
+
+    expect(mocks.uiState.setSyncStatus).toHaveBeenCalledWith("syncing");
+    await waitFor(() => expect(mocks.syncMutateAsync).toHaveBeenCalledWith("account-1"));
+    expect(mocks.uiState.setSyncStatus).toHaveBeenCalledWith("idle");
   });
 });

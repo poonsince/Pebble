@@ -1,5 +1,5 @@
+use pebble_core::{new_id, Message};
 use std::collections::HashMap;
-use pebble_core::{Message, new_id};
 
 /// Strip common reply/forward prefixes from a subject line, recursively.
 /// Handles Re:, Fwd:, Fw:, 回复:, 转发: (case-insensitive).
@@ -15,7 +15,8 @@ pub fn normalize_subject(subject: &str) -> String {
                 // chars in the *original* string to avoid byte-boundary panics
                 // when to_lowercase() changes byte length.
                 let char_count = prefix.chars().count();
-                let byte_offset = s.char_indices()
+                let byte_offset = s
+                    .char_indices()
                     .nth(char_count)
                     .map(|(i, _)| i)
                     .unwrap_or(s.len());
@@ -42,9 +43,7 @@ pub fn normalize_subject(subject: &str) -> String {
 /// 3. Fall back to the message's own `message_id_header`.
 /// 4. If none, generate a new UUID.
 pub fn compute_thread_id(message: &Message, existing_threads: &HashMap<String, String>) -> String {
-    let lookup = |mid: &str| -> Option<String> {
-        existing_threads.get(mid.trim()).cloned()
-    };
+    let lookup = |mid: &str| -> Option<String> { existing_threads.get(mid.trim()).cloned() };
 
     // 1. Check In-Reply-To
     if let Some(irt) = &message.in_reply_to {
@@ -77,7 +76,7 @@ pub fn compute_thread_id(message: &Message, existing_threads: &HashMap<String, S
 #[cfg(test)]
 mod tests {
     use super::*;
-    use pebble_core::{EmailAddress, Message, new_id, now_timestamp};
+    use pebble_core::{new_id, now_timestamp, EmailAddress, Message};
 
     fn make_message(
         message_id_header: Option<&str>,
@@ -147,9 +146,12 @@ mod tests {
 
     #[test]
     fn test_compute_thread_id_reply() {
-        let existing: HashMap<String, String> = [
-            ("<original@example.com>".to_string(), "thread-abc".to_string()),
-        ].into_iter().collect();
+        let existing: HashMap<String, String> = [(
+            "<original@example.com>".to_string(),
+            "thread-abc".to_string(),
+        )]
+        .into_iter()
+        .collect();
         let msg = make_message(
             Some("<reply@example.com>"),
             Some("<original@example.com>"),
@@ -161,9 +163,10 @@ mod tests {
 
     #[test]
     fn test_compute_thread_id_via_references() {
-        let existing: HashMap<String, String> = [
-            ("<root@example.com>".to_string(), "thread-xyz".to_string()),
-        ].into_iter().collect();
+        let existing: HashMap<String, String> =
+            [("<root@example.com>".to_string(), "thread-xyz".to_string())]
+                .into_iter()
+                .collect();
         let msg = make_message(
             Some("<reply2@example.com>"),
             Some("<nonexistent@example.com>"),

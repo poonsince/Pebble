@@ -1,5 +1,5 @@
 use crate::{events, state::AppState};
-use pebble_core::traits::{FolderProvider, LabelProvider};
+use pebble_core::traits::{FolderProvider, LabelProvider, MailTransport};
 use pebble_core::{FolderRole, Message, PebbleError, ProviderType};
 use pebble_store::pending_ops::{PendingMailOp, PendingMailOpsSummary};
 use pebble_store::Store;
@@ -8,6 +8,7 @@ use serde_json::Value;
 use tauri::{Emitter, Manager, State};
 use tracing::{debug, warn};
 
+use super::compose::{self, LocalOutgoingState};
 use super::messages::{
     connect_gmail, connect_imap, connect_outlook, find_folder_by_role, find_message_folder,
     refresh_search_document, remove_search_documents,
@@ -189,7 +190,15 @@ async fn replay_pending_mail_op(
         "update_flags" => {
             let is_read = optional_bool(&payload, "is_read");
             let is_starred = optional_bool(&payload, "is_starred");
-            replay_remote_update_flags(state, account.provider, &message, &payload, is_read, is_starred).await?;
+            replay_remote_update_flags(
+                state,
+                account.provider,
+                &message,
+                &payload,
+                is_read,
+                is_starred,
+            )
+            .await?;
         }
         "archive" => {
             replay_remote_archive(state, account.provider, &message, &payload).await?;
@@ -205,6 +214,9 @@ async fn replay_pending_mail_op(
         }
         "move_to_folder" => {
             replay_remote_move_to_folder(state, account.provider, &message, &payload).await?;
+        }
+        "send" => {
+            replay_remote_send(state, account.provider.clone(), &account, &message).await?;
         }
         other => {
             return Err(PebbleError::Internal(format!(
@@ -259,10 +271,14 @@ async fn replay_remote_update_flags(
         ProviderType::Outlook => {
             let provider = connect_outlook(state, &message.account_id).await?;
             if let Some(read) = is_read {
-                provider.update_read_status(&message.remote_id, read).await?;
+                provider
+                    .update_read_status(&message.remote_id, read)
+                    .await?;
             }
             if let Some(starred) = is_starred {
-                provider.update_flag_status(&message.remote_id, starred).await?;
+                provider
+                    .update_flag_status(&message.remote_id, starred)
+                    .await?;
             }
             Ok(())
         }
@@ -307,7 +323,8 @@ async fn replay_remote_archive(
                 .await
         }
         ProviderType::Outlook => {
-            let target_remote_id = target_folder_remote_id(state, message, payload, FolderRole::Archive)?;
+            let target_remote_id =
+                target_folder_remote_id(state, message, payload, FolderRole::Archive)?;
             connect_outlook(state, &message.account_id)
                 .await?
                 .move_message(&message.remote_id, &target_remote_id)
@@ -315,7 +332,8 @@ async fn replay_remote_archive(
         }
         ProviderType::Imap => {
             let source_remote_id = source_folder_remote_id(state, message, payload)?;
-            let target_remote_id = target_folder_remote_id(state, message, payload, FolderRole::Archive)?;
+            let target_remote_id =
+                target_folder_remote_id(state, message, payload, FolderRole::Archive)?;
             let uid = parse_uid(message)?;
             let imap = connect_imap(state, &message.account_id).await?;
             let result = imap
@@ -363,7 +381,8 @@ async fn replay_remote_restore(
         }
         ProviderType::Imap => {
             let source_remote_id = source_folder_remote_id(state, message, payload)?;
-            let target_remote_id = target_folder_remote_id(state, message, payload, FolderRole::Inbox)?;
+            let target_remote_id =
+                target_folder_remote_id(state, message, payload, FolderRole::Inbox)?;
             let uid = parse_uid(message)?;
             let imap = connect_imap(state, &message.account_id).await?;
             let result = imap
@@ -386,7 +405,9 @@ async fn replay_remote_delete(
         ProviderType::Gmail => {
             let provider = connect_gmail(state, &message.account_id).await?;
             if permanent {
-                provider.delete_message_permanently(&message.remote_id).await
+                provider
+                    .delete_message_permanently(&message.remote_id)
+                    .await
             } else {
                 provider.trash_message(&message.remote_id).await
             }
@@ -394,7 +415,9 @@ async fn replay_remote_delete(
         ProviderType::Outlook => {
             let provider = connect_outlook(state, &message.account_id).await?;
             if permanent {
-                provider.delete_message_permanently(&message.remote_id).await
+                provider
+                    .delete_message_permanently(&message.remote_id)
+                    .await
             } else {
                 provider.trash_message(&message.remote_id).await
             }
@@ -448,7 +471,8 @@ async fn replay_remote_move_to_folder(
                 .await
         }
         ProviderType::Outlook => {
-            let target_remote_id = target_folder_remote_id(state, message, payload, FolderRole::Inbox)?;
+            let target_remote_id =
+                target_folder_remote_id(state, message, payload, FolderRole::Inbox)?;
             connect_outlook(state, &message.account_id)
                 .await?
                 .move_message(&message.remote_id, &target_remote_id)
@@ -456,7 +480,8 @@ async fn replay_remote_move_to_folder(
         }
         ProviderType::Imap => {
             let source_remote_id = source_folder_remote_id(state, message, payload)?;
-            let target_remote_id = target_folder_remote_id(state, message, payload, FolderRole::Inbox)?;
+            let target_remote_id =
+                target_folder_remote_id(state, message, payload, FolderRole::Inbox)?;
             let uid = parse_uid(message)?;
             let imap = connect_imap(state, &message.account_id).await?;
             let result = imap
@@ -465,6 +490,37 @@ async fn replay_remote_move_to_folder(
             let _ = imap.disconnect().await;
             result
         }
+    }
+}
+
+async fn replay_remote_send(
+    state: &AppState,
+    provider_type: ProviderType,
+    account: &pebble_core::Account,
+    message: &pebble_core::Message,
+) -> std::result::Result<(), PebbleError> {
+    let attachment_paths = state
+        .store
+        .list_attachments_by_message(&message.id)?
+        .into_iter()
+        .filter_map(|attachment| attachment.local_path)
+        .collect::<Vec<_>>();
+    let outgoing = compose::outgoing_message_from_stored(message, attachment_paths);
+
+    match provider_type {
+        ProviderType::Gmail => {
+            connect_gmail(state, &account.id)
+                .await?
+                .send_message(&outgoing)
+                .await
+        }
+        ProviderType::Outlook => {
+            connect_outlook(state, &account.id)
+                .await?
+                .send_message(&outgoing)
+                .await
+        }
+        ProviderType::Imap => compose::send_imap_smtp_message(state, account, &outgoing).await,
     }
 }
 
@@ -520,7 +576,9 @@ fn apply_pending_local_commit(
                 } else {
                     store.soft_delete_message(&op.message_id)?;
                 }
-            } else if let Some(trash) = store.find_folder_by_role(&op.account_id, FolderRole::Trash)? {
+            } else if let Some(trash) =
+                store.find_folder_by_role(&op.account_id, FolderRole::Trash)?
+            {
                 store.move_message_to_folder(&op.message_id, &trash.id)?;
             } else {
                 store.soft_delete_message(&op.message_id)?;
@@ -533,6 +591,14 @@ fn apply_pending_local_commit(
             let folder_id = string_field(&payload, "target_folder_id")
                 .ok_or_else(|| PebbleError::Internal("No move target folder".to_string()))?;
             store.move_message_to_folder(&op.message_id, &folder_id)?;
+        }
+        "send" => {
+            let sent = compose::ensure_local_outgoing_folder(
+                store,
+                &op.account_id,
+                LocalOutgoingState::Sent,
+            )?;
+            store.move_message_to_folder(&op.message_id, &sent.id)?;
         }
         other => {
             return Err(PebbleError::Internal(format!(
@@ -557,10 +623,7 @@ fn refresh_after_pending_commit(
 fn op_payload(op: &PendingMailOp) -> std::result::Result<Value, PebbleError> {
     let value: Value = serde_json::from_str(&op.payload_json)
         .map_err(|e| PebbleError::Internal(format!("Invalid pending op payload: {e}")))?;
-    Ok(value
-        .get("payload")
-        .cloned()
-        .unwrap_or(value))
+    Ok(value.get("payload").cloned().unwrap_or(value))
 }
 
 fn string_field(payload: &Value, key: &str) -> Option<String> {

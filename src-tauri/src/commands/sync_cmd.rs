@@ -577,28 +577,36 @@ fn build_sync_task(
 
 #[tauri::command]
 pub async fn trigger_sync(
+    app: tauri::AppHandle,
     state: State<'_, AppState>,
     account_id: String,
     reason: String,
 ) -> std::result::Result<(), PebbleError> {
     let trigger = SyncTrigger::from_reason(&reason);
-    let mut handles = state.sync_handles.lock().await;
-    let should_remove = match handles.get(&account_id) {
-        Some(handle) if handle.task.is_finished() => true,
-        Some(handle) => {
-            let send_failed = handle.trigger_tx.send(trigger).is_err();
-            if send_failed {
-                warn!(
-                    "Sync trigger channel was already closed for account {}",
-                    account_id
-                );
+    let should_start_one_shot = {
+        let mut handles = state.sync_handles.lock().await;
+        match handles.get(&account_id) {
+            Some(handle) if handle.task.is_finished() => {
+                handles.remove(&account_id);
+                true
             }
-            should_drop_trigger_handle(false, send_failed)
+            Some(handle) => {
+                let send_failed = handle.trigger_tx.send(trigger).is_err();
+                if send_failed {
+                    warn!(
+                        "Sync trigger channel was already closed for account {}",
+                        account_id
+                    );
+                    handles.remove(&account_id);
+                }
+                should_drop_trigger_handle(false, send_failed)
+            }
+            None => true,
         }
-        None => false,
     };
-    if should_remove {
-        handles.remove(&account_id);
+
+    if should_start_one_shot {
+        start_sync_inner(&app, &state, account_id, Some(0)).await?;
     }
     Ok(())
 }

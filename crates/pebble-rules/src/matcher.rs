@@ -1,14 +1,20 @@
-use pebble_core::Message;
 use crate::types::*;
+use pebble_core::Message;
 
 pub fn evaluate_condition(msg: &Message, condition: &RuleCondition) -> bool {
     let field_value = match condition.field {
         ConditionField::From => &msg.from_address,
         ConditionField::To => {
-            let matches_any = msg.to_list.iter().any(|a| match_op(&a.address, &condition.op, &condition.value));
+            let matches_any = msg
+                .to_list
+                .iter()
+                .any(|a| match_op(&a.address, &condition.op, &condition.value));
             // For NotContains, we want ALL addresses to not contain (none contain)
             if matches!(condition.op, ConditionOp::NotContains) {
-                return msg.to_list.iter().all(|a| match_op(&a.address, &condition.op, &condition.value));
+                return msg
+                    .to_list
+                    .iter()
+                    .all(|a| match_op(&a.address, &condition.op, &condition.value));
             }
             return matches_any;
         }
@@ -46,8 +52,14 @@ fn match_op(field_value: &str, op: &ConditionOp, value: &str) -> bool {
 
 pub fn evaluate_conditions(msg: &Message, conditions: &RuleConditionSet) -> bool {
     match conditions.operator {
-        LogicalOp::And => conditions.conditions.iter().all(|c| evaluate_condition(msg, c)),
-        LogicalOp::Or => conditions.conditions.iter().any(|c| evaluate_condition(msg, c)),
+        LogicalOp::And => conditions
+            .conditions
+            .iter()
+            .all(|c| evaluate_condition(msg, c)),
+        LogicalOp::Or => conditions
+            .conditions
+            .iter()
+            .any(|c| evaluate_condition(msg, c)),
     }
 }
 

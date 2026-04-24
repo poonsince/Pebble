@@ -26,9 +26,7 @@ pub async fn create_rule(
 }
 
 #[tauri::command]
-pub async fn list_rules(
-    state: State<'_, AppState>,
-) -> std::result::Result<Vec<Rule>, PebbleError> {
+pub async fn list_rules(state: State<'_, AppState>) -> std::result::Result<Vec<Rule>, PebbleError> {
     state.store.list_rules()
 }
 
