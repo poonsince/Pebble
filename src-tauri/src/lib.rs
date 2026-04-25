@@ -6,8 +6,12 @@ mod state;
 
 use state::AppState;
 use std::path::PathBuf;
+use std::sync::OnceLock;
 use std::time::Instant;
 use tauri::{Emitter, Manager};
+use tracing_subscriber::prelude::*;
+
+static LOG_GUARD: OnceLock<tracing_appender::non_blocking::WorkerGuard> = OnceLock::new();
 
 #[derive(Debug, PartialEq, Eq)]
 struct StartupPhaseTiming {
@@ -77,17 +81,34 @@ mod startup_timing_tests {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
-                "pebble=info,pebble_store=info,pebble_mail=info,pebble_search=info,pebble_translate=info,pebble_crypto=info,pebble_oauth=info".into()
-            }),
-        )
-        .init();
-
     tauri::Builder::default()
         .plugin(tauri_plugin_notification::init())
         .setup(|app| {
+            let app_data = app.path().app_data_dir()?;
+            std::fs::create_dir_all(&app_data)?;
+            let log_dir = commands::diagnostics::app_log_dir(&app_data);
+            std::fs::create_dir_all(&log_dir)?;
+            let file_appender =
+                tracing_appender::rolling::never(&log_dir, commands::diagnostics::LOG_FILE_NAME);
+            let (file_writer, guard) = tracing_appender::non_blocking(file_appender);
+            let env_filter =
+                tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
+                    "pebble=info,pebble_store=info,pebble_mail=info,pebble_search=info,pebble_translate=info,pebble_crypto=info,pebble_oauth=info".into()
+                });
+            let stdout_layer = tracing_subscriber::fmt::layer().with_writer(std::io::stdout);
+            let file_layer = tracing_subscriber::fmt::layer()
+                .with_writer(file_writer)
+                .with_ansi(false);
+            if tracing_subscriber::registry()
+                .with(env_filter)
+                .with(stdout_layer)
+                .with(file_layer)
+                .try_init()
+                .is_ok()
+            {
+                let _ = LOG_GUARD.set(guard);
+            }
+
             let startup_start = Instant::now();
             let mut startup_phase = startup_start;
             tracing::info!("[startup] tauri setup started");
@@ -243,6 +264,7 @@ pub fn run() {
             commands::health::health_check,
             commands::health::check_for_update,
             commands::health::open_external_url,
+            commands::diagnostics::read_app_log,
             commands::accounts::add_account,
             commands::accounts::update_account,
             commands::accounts::list_accounts,

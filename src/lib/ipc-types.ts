@@ -103,6 +103,13 @@ export interface PendingMailOp {
   updated_at: number;
 }
 
+/** @rust src-tauri/src/commands/diagnostics.rs -> AppLogSnapshot */
+export interface AppLogSnapshot {
+  path: string;
+  content: string;
+  truncated: boolean;
+}
+
 /** @rust pebble-core/src/types.rs → RenderedHtml */
 export interface RenderedHtml {
   html: string;

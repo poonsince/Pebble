@@ -3,7 +3,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use crate::backoff::SyncBackoff;
-use pebble_core::{new_id, now_timestamp, Message, Result};
+use pebble_core::{new_id, now_timestamp, Message, PebbleError, Result};
 use pebble_store::Store;
 use tokio::sync::{mpsc, watch};
 use tracing::{debug, error, info, warn};
@@ -281,6 +281,40 @@ fn should_run_imap_deletion_diff(_server_exists: u32, local_count: usize) -> boo
     local_count > 0
 }
 
+fn idle_check_recovery_user_error(
+    reconnect_error: Option<String>,
+    poll_error: Option<String>,
+) -> Option<(&'static str, String)> {
+    if let Some(error) = reconnect_error {
+        return Some((
+            "connection",
+            format!("IMAP reconnect after idle check failed: {error}"),
+        ));
+    }
+    if let Some(error) = poll_error {
+        return Some((
+            "poll",
+            format!("Poll after idle check reconnect failed: {error}"),
+        ));
+    }
+    None
+}
+
+fn is_retryable_imap_connection_error(error: &PebbleError) -> bool {
+    let PebbleError::Network(message) = error else {
+        return false;
+    };
+    let lower = message.to_ascii_lowercase();
+
+    lower.contains("os error 10053")
+        || lower.contains("connection reset")
+        || lower.contains("connection aborted")
+        || lower.contains("broken pipe")
+        || lower.contains("connection closed")
+        || lower.contains("unexpected eof")
+        || lower == "not connected"
+}
+
 /// Configuration for the sync worker.
 #[derive(Debug, Clone)]
 pub struct SyncConfig {
@@ -456,25 +490,32 @@ impl SyncWorker {
         cursor
     }
 
-    async fn imap_folder_cursor_for_sync(&self, folder: &pebble_core::Folder) -> ImapFolderCursor {
+    async fn try_imap_folder_cursor_for_sync(
+        &self,
+        folder: &pebble_core::Folder,
+    ) -> Result<ImapFolderCursor> {
         let cursor = self.stored_imap_folder_cursor(folder);
-        match self
+        let status = self
             .provider
             .inner()
             .get_mailbox_status(&folder.remote_id)
-            .await
-        {
-            Ok(status) => prepare_imap_folder_cursor_for_status(
-                cursor,
-                status.uid_validity.map(u64::from),
-                status.highest_modseq,
-            ),
+            .await?;
+        Ok(prepare_imap_folder_cursor_for_status(
+            cursor,
+            status.uid_validity.map(u64::from),
+            status.highest_modseq,
+        ))
+    }
+
+    async fn imap_folder_cursor_for_sync(&self, folder: &pebble_core::Folder) -> ImapFolderCursor {
+        match self.try_imap_folder_cursor_for_sync(folder).await {
+            Ok(cursor) => cursor,
             Err(e) => {
                 warn!(
                     "Failed to read IMAP mailbox status for {}: {}",
                     folder.name, e
                 );
-                cursor
+                self.stored_imap_folder_cursor(folder)
             }
         }
     }
@@ -786,29 +827,58 @@ impl SyncWorker {
         }
 
         for folder in &folders {
-            let cursor = self.imap_folder_cursor_for_sync(folder).await;
-            let since_uid = cursor.last_uid;
+            self.poll_imap_folder_with_reconnect(folder).await;
+        }
 
-            match self.sync_folder(folder, since_uid, 50, true).await {
-                Ok(count) if count > 0 => {
-                    info!(
-                        "Polled {} new messages from {} for account {}",
-                        count, folder.name, self.base.account_id
-                    );
-                    if let Err(e) = self.persist_imap_folder_cursor_after_sync(folder, cursor) {
-                        warn!("Failed to persist IMAP cursor for {}: {}", folder.name, e);
-                    }
-                }
-                Ok(_) => {
-                    if let Err(e) = self.persist_imap_folder_cursor_after_sync(folder, cursor) {
-                        warn!("Failed to persist IMAP cursor for {}: {}", folder.name, e);
-                    }
-                }
-                Err(e) => warn!(
-                    "Poll failed for folder {} account {}: {}",
+        Ok(())
+    }
+
+    async fn poll_imap_folder_with_reconnect(&self, folder: &pebble_core::Folder) {
+        match self.poll_imap_folder_once(folder).await {
+            Ok(()) => {}
+            Err(e) if is_retryable_imap_connection_error(&e) => {
+                warn!(
+                    "IMAP connection failed while polling folder {} account {}; reconnecting before retry: {}",
                     folder.name, self.base.account_id, e
-                ),
+                );
+                let _ = self.provider.disconnect().await;
+                match self.provider.connect().await {
+                    Ok(()) => {
+                        if let Err(retry_error) = self.poll_imap_folder_once(folder).await {
+                            warn!(
+                                "Poll retry failed for folder {} account {} after reconnect: {}",
+                                folder.name, self.base.account_id, retry_error
+                            );
+                        }
+                    }
+                    Err(reconnect_error) => {
+                        warn!(
+                            "Reconnect failed while polling folder {} account {}: {}",
+                            folder.name, self.base.account_id, reconnect_error
+                        );
+                    }
+                }
             }
+            Err(e) => warn!(
+                "Poll failed for folder {} account {}: {}",
+                folder.name, self.base.account_id, e
+            ),
+        }
+    }
+
+    async fn poll_imap_folder_once(&self, folder: &pebble_core::Folder) -> Result<()> {
+        let cursor = self.try_imap_folder_cursor_for_sync(folder).await?;
+        let since_uid = cursor.last_uid;
+
+        let count = self.sync_folder(folder, since_uid, 50, true).await?;
+        if count > 0 {
+            info!(
+                "Polled {} new messages from {} for account {}",
+                count, folder.name, self.base.account_id
+            );
+        }
+        if let Err(e) = self.persist_imap_folder_cursor_after_sync(folder, cursor) {
+            warn!("Failed to persist IMAP cursor for {}: {}", folder.name, e);
         }
 
         Ok(())
@@ -1217,11 +1287,34 @@ impl SyncWorker {
                             }
                             Ok(crate::idle::IdleEvent::Error(e)) => {
                                 warn!("IDLE check error for account {}: {}", self.base.account_id, e);
-                                self.base.emit_error("idle", &format!("IDLE check error: {}", e));
-                                // Fall back to regular poll on error
-                                if let Err(e) = self.poll_new_messages().await {
-                                    warn!("Poll error for account {}: {}", self.base.account_id, e);
-                                    self.base.emit_error("poll", &format!("Poll error: {}", e));
+                                let _ = self.provider.disconnect().await;
+                                let recovery_error = match self.provider.connect().await {
+                                    Ok(()) => match self.poll_new_messages().await {
+                                        Ok(()) => None,
+                                        Err(poll_error) => {
+                                            warn!(
+                                                "Poll after idle check reconnect failed for account {}: {}",
+                                                self.base.account_id, poll_error
+                                            );
+                                            idle_check_recovery_user_error(
+                                                None,
+                                                Some(poll_error.to_string()),
+                                            )
+                                        }
+                                    },
+                                    Err(reconnect_error) => {
+                                        warn!(
+                                            "Reconnect after idle check failed for account {}: {}",
+                                            self.base.account_id, reconnect_error
+                                        );
+                                        idle_check_recovery_user_error(
+                                            Some(reconnect_error.to_string()),
+                                            None,
+                                        )
+                                    }
+                                };
+                                if let Some((error_type, message)) = recovery_error {
+                                    self.base.emit_error(error_type, &message);
                                     backoff.record_failure();
                                 } else {
                                     backoff.record_success();
@@ -1453,5 +1546,46 @@ mod tests {
             }),
             std::time::Duration::from_secs(120)
         );
+    }
+
+    #[test]
+    fn idle_check_disconnect_does_not_surface_when_recovery_succeeds() {
+        let message = idle_check_recovery_user_error(None, None);
+
+        assert!(message.is_none());
+    }
+
+    #[test]
+    fn idle_check_reconnect_failure_surfaces_connection_error() {
+        let message =
+            idle_check_recovery_user_error(Some("Network error: os error 10053".to_string()), None);
+
+        assert_eq!(
+            message,
+            Some((
+                "connection",
+                "IMAP reconnect after idle check failed: Network error: os error 10053".to_string()
+            ))
+        );
+    }
+
+    #[test]
+    fn imap_windows_connection_abort_is_retryable_for_polling() {
+        let error = pebble_core::PebbleError::Network(
+            "SELECT failed: io: 你的主机中的软件中止了一个已建立的连接。 (os error 10053)"
+                .to_string(),
+        );
+
+        assert!(is_retryable_imap_connection_error(&error));
+    }
+
+    #[test]
+    fn imap_missing_folder_select_error_is_not_retryable_for_polling() {
+        let error = pebble_core::PebbleError::Network(
+            "SELECT failed: no response: code: None, info: Some(\"SELECT Folder not exist\")"
+                .to_string(),
+        );
+
+        assert!(!is_retryable_imap_connection_error(&error));
     }
 }

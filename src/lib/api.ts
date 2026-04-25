@@ -5,6 +5,7 @@ export type {
   Account,
   AddAccountRequest,
   AdvancedSearchQuery,
+  AppLogSnapshot,
   Attachment,
   BackupPreview,
   ConnectionSecurity,
@@ -33,6 +34,7 @@ import type {
   Account,
   AddAccountRequest,
   AdvancedSearchQuery,
+  AppLogSnapshot,
   Attachment,
   BackupPreview,
   ConnectionSecurity,
@@ -60,6 +62,10 @@ import type {
 
 export async function healthCheck(): Promise<string> {
   return invoke<string>("health_check");
+}
+
+export async function readAppLog(maxBytes: number): Promise<AppLogSnapshot> {
+  return invoke<AppLogSnapshot>("read_app_log", { maxBytes });
 }
 
 export async function completeOAuthFlow(

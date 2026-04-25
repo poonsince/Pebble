@@ -5,6 +5,7 @@ pub mod batch;
 pub mod cloud_sync;
 pub mod compose;
 pub mod contacts;
+pub mod diagnostics;
 pub mod drafts;
 pub mod folder_counts;
 pub mod folders;

@@ -1,8 +1,11 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import type { ReactNode, Ref } from "react";
 import { useTranslation } from "react-i18next";
 import { getVersion } from "@tauri-apps/api/app";
 import { invoke } from "@tauri-apps/api/core";
+import { Copy, RefreshCw, X } from "lucide-react";
 import iconUrl from "@/assets/app-icon.png";
+import { readAppLog, type AppLogSnapshot } from "@/lib/api";
 
 const REPO = "QingJ01/Pebble";
 const RELEASES_URL = `https://github.com/${REPO}/releases`;
@@ -18,15 +21,32 @@ interface UpdateState {
   error?: string;
 }
 
+type DiagnosticLogState =
+  | { status: "loading" }
+  | { status: "ready"; snapshot: AppLogSnapshot }
+  | { status: "error"; error: string };
+
+const DIAGNOSTIC_CLICK_TARGET = 5;
+const DIAGNOSTIC_CLICK_WINDOW_MS = 1500;
+const DIAGNOSTIC_LOG_MAX_BYTES = 64 * 1024;
+
 export default function AboutTab() {
   const { t } = useTranslation();
   const [appVersion, setAppVersion] = useState<string>("");
   const [update, setUpdate] = useState<UpdateState>({ status: "idle" });
+  const [diagnosticLog, setDiagnosticLog] = useState<DiagnosticLogState | null>(null);
+  const diagnosticClickCount = useRef(0);
+  const diagnosticClickTimer = useRef<number | null>(null);
 
-  // Load version on first render
-  if (!appVersion) {
+  useEffect(() => {
     getVersion().then(setAppVersion).catch(() => setAppVersion("0.1.0"));
-  }
+  }, []);
+
+  useEffect(() => () => {
+    if (diagnosticClickTimer.current !== null) {
+      window.clearTimeout(diagnosticClickTimer.current);
+    }
+  }, []);
 
   async function handleCheckUpdate() {
     setUpdate({ status: "checking" });
@@ -53,6 +73,38 @@ export default function AboutTab() {
     }
   }
 
+  async function loadDiagnosticLog() {
+    setDiagnosticLog({ status: "loading" });
+    try {
+      const snapshot = await readAppLog(DIAGNOSTIC_LOG_MAX_BYTES);
+      setDiagnosticLog({ status: "ready", snapshot });
+    } catch (err) {
+      setDiagnosticLog({
+        status: "error",
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  function handleDiagnosticIconClick() {
+    diagnosticClickCount.current += 1;
+
+    if (diagnosticClickTimer.current !== null) {
+      window.clearTimeout(diagnosticClickTimer.current);
+    }
+
+    if (diagnosticClickCount.current >= DIAGNOSTIC_CLICK_TARGET) {
+      diagnosticClickCount.current = 0;
+      void loadDiagnosticLog();
+      return;
+    }
+
+    diagnosticClickTimer.current = window.setTimeout(() => {
+      diagnosticClickCount.current = 0;
+      diagnosticClickTimer.current = null;
+    }, DIAGNOSTIC_CLICK_WINDOW_MS);
+  }
+
   return (
     <div>
       <h2
@@ -70,11 +122,29 @@ export default function AboutTab() {
       {/* App info */}
       <div style={{ marginBottom: "24px" }}>
         <div style={{ display: "flex", alignItems: "center", gap: "14px", marginBottom: "16px" }}>
-          <img
-            src={iconUrl}
-            alt="Pebble"
-            style={{ width: "56px", height: "56px", borderRadius: "12px" }}
-          />
+          <button
+            type="button"
+            onClick={handleDiagnosticIconClick}
+            aria-label={t("about.openDiagnosticLog", "Open diagnostic log")}
+            title="Pebble"
+            style={{
+              width: "56px",
+              height: "56px",
+              padding: 0,
+              border: "none",
+              borderRadius: "12px",
+              background: "transparent",
+              cursor: "default",
+              lineHeight: 0,
+            }}
+          >
+            <img
+              src={iconUrl}
+              alt=""
+              draggable={false}
+              style={{ width: "56px", height: "56px", borderRadius: "12px" }}
+            />
+          </button>
           <div>
             <div style={{ fontSize: "17px", fontWeight: 600, color: "var(--color-text-primary)" }}>
               Pebble
@@ -234,6 +304,242 @@ export default function AboutTab() {
           ))}
         </div>
       </div>
+
+      {diagnosticLog && (
+        <DiagnosticLogDialog
+          state={diagnosticLog}
+          title={t("about.diagnosticLog", "Diagnostic log")}
+          loadingLabel={t("common.loading", "Loading...")}
+          emptyLabel={t("about.noDiagnosticLog", "No log entries yet.")}
+          truncatedLabel={t("about.diagnosticLogTruncated", "Showing latest 64 KB")}
+          refreshLabel={t("common.retry", "Retry")}
+          copyPathLabel={t("about.copyLogPath", "Copy path")}
+          closeLabel={t("common.close", "Close")}
+          onRefresh={() => void loadDiagnosticLog()}
+          onClose={() => setDiagnosticLog(null)}
+        />
+      )}
     </div>
   );
 }
+
+function DiagnosticLogDialog({
+  state,
+  title,
+  loadingLabel,
+  emptyLabel,
+  truncatedLabel,
+  refreshLabel,
+  copyPathLabel,
+  closeLabel,
+  onRefresh,
+  onClose,
+}: {
+  state: DiagnosticLogState;
+  title: string;
+  loadingLabel: string;
+  emptyLabel: string;
+  truncatedLabel: string;
+  refreshLabel: string;
+  copyPathLabel: string;
+  closeLabel: string;
+  onRefresh: () => void;
+  onClose: () => void;
+}) {
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+  const snapshot = state.status === "ready" ? state.snapshot : null;
+
+  useEffect(() => {
+    closeButtonRef.current?.focus();
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        onClose();
+      }
+    }
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [onClose]);
+
+  function handleCopyPath() {
+    if (!snapshot) {
+      return;
+    }
+    void navigator.clipboard?.writeText(snapshot.path);
+  }
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="diagnostic-log-title"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+      style={{
+        position: "fixed",
+        inset: 0,
+        zIndex: 1200,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: "24px",
+        backgroundColor: "rgba(0, 0, 0, 0.48)",
+      }}
+    >
+      <div
+        style={{
+          width: "min(820px, calc(100vw - 48px))",
+          maxHeight: "min(720px, calc(100vh - 48px))",
+          display: "flex",
+          flexDirection: "column",
+          overflow: "hidden",
+          border: "1px solid var(--color-border)",
+          borderRadius: "10px",
+          backgroundColor: "var(--color-bg)",
+          boxShadow: "0 24px 70px rgba(0, 0, 0, 0.32)",
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: "12px",
+            padding: "16px 18px",
+            borderBottom: "1px solid var(--color-border)",
+          }}
+        >
+          <div style={{ minWidth: 0 }}>
+            <h3
+              id="diagnostic-log-title"
+              style={{ margin: 0, fontSize: "15px", fontWeight: 600, color: "var(--color-text-primary)" }}
+            >
+              {title}
+            </h3>
+            {snapshot && (
+              <div
+                style={{
+                  marginTop: "6px",
+                  fontSize: "12px",
+                  color: "var(--color-text-secondary)",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {snapshot.path}
+              </div>
+            )}
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: "8px", flexShrink: 0 }}>
+            <IconButton
+              label={refreshLabel}
+              onClick={onRefresh}
+              disabled={state.status === "loading"}
+              icon={<RefreshCw size={16} />}
+            />
+            <IconButton
+              label={copyPathLabel}
+              onClick={handleCopyPath}
+              disabled={!snapshot}
+              icon={<Copy size={16} />}
+            />
+            <IconButton
+              buttonRef={closeButtonRef}
+              label={closeLabel}
+              onClick={onClose}
+              icon={<X size={16} />}
+            />
+          </div>
+        </div>
+
+        {state.status === "loading" && (
+          <div style={{ padding: "22px", fontSize: "13px", color: "var(--color-text-secondary)" }}>
+            {loadingLabel}
+          </div>
+        )}
+
+        {state.status === "error" && (
+          <div style={{ padding: "22px", fontSize: "13px", color: "#dc3545", whiteSpace: "pre-wrap" }}>
+            {state.error}
+          </div>
+        )}
+
+        {snapshot && (
+          <>
+            {snapshot.truncated && (
+              <div
+                style={{
+                  padding: "8px 18px",
+                  borderBottom: "1px solid var(--color-border)",
+                  fontSize: "12px",
+                  color: "var(--color-text-secondary)",
+                  backgroundColor: "var(--color-bg-hover)",
+                }}
+              >
+                {truncatedLabel}
+              </div>
+            )}
+            <pre
+              style={{
+                margin: 0,
+                minHeight: "260px",
+                maxHeight: "560px",
+                overflow: "auto",
+                padding: "18px",
+                fontSize: "12px",
+                lineHeight: 1.6,
+                color: "var(--color-text-primary)",
+                backgroundColor: "var(--color-bg)",
+                whiteSpace: "pre-wrap",
+                wordBreak: "break-word",
+                fontFamily: "Consolas, 'SFMono-Regular', Menlo, monospace",
+              }}
+            >
+              {snapshot.content || emptyLabel}
+            </pre>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+const IconButton = ({
+  icon,
+  label,
+  onClick,
+  disabled,
+  buttonRef,
+}: {
+  icon: ReactNode;
+  label: string;
+  onClick: () => void;
+  disabled?: boolean;
+  buttonRef?: Ref<HTMLButtonElement>;
+}) => (
+  <button
+    ref={buttonRef}
+    type="button"
+    onClick={onClick}
+    disabled={disabled}
+    aria-label={label}
+    title={label}
+    style={{
+      width: "32px",
+      height: "32px",
+      display: "inline-flex",
+      alignItems: "center",
+      justifyContent: "center",
+      border: "1px solid var(--color-border)",
+      borderRadius: "6px",
+      backgroundColor: "var(--color-bg-hover)",
+      color: "var(--color-text-primary)",
+      cursor: disabled ? "not-allowed" : "pointer",
+      opacity: disabled ? 0.55 : 1,
+    }}
+  >
+    {icon}
+  </button>
+);
