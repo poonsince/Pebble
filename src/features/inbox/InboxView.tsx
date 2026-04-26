@@ -104,8 +104,8 @@ export default function InboxView() {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
-      <div style={{ display: "flex", alignItems: "center" }}>
-        <div style={{ flex: 1 }}>
+      <div className="inbox-toolbar-row">
+        <div className="inbox-toolbar-search">
           <SearchBar onSearch={() => {}} onClear={() => {}} />
         </div>
         {isTrashFolder && messages.length > 0 && (
@@ -146,26 +146,20 @@ export default function InboxView() {
         )}
         {!threadView && (
           <button
+            type="button"
             onClick={() => useMailStore.getState().toggleBatchMode()}
             aria-label={t("batch.toggle", "Batch select")}
-            style={{
-              background: "none", border: "none", cursor: "pointer", padding: "6px 10px",
-              color: "var(--color-text-secondary)", display: "flex", alignItems: "center",
-              fontSize: "12px",
-            }}
+            className="inbox-toolbar-button"
             title={t("batch.toggle", "Batch select")}
           >
             <CheckSquare size={16} />
           </button>
         )}
         <button
+          type="button"
           onClick={toggleThreadView}
           aria-label={threadView ? t("inbox.messageView") : t("inbox.threadView")}
-          style={{
-            background: "none", border: "none", cursor: "pointer", padding: "6px 10px",
-            color: "var(--color-text-secondary)", display: "flex", alignItems: "center",
-            gap: "4px", fontSize: "12px", marginRight: "8px",
-          }}
+          className="inbox-toolbar-button inbox-toolbar-button--end"
           title={threadView ? t("inbox.messageView") : t("inbox.threadView")}
         >
           {threadView ? <List size={16} /> : <MessageSquare size={16} />}

@@ -208,4 +208,23 @@ describe("MessageList", () => {
     expect(mocks.queryClient.invalidateQueries).toHaveBeenCalledWith({ queryKey: ["threads"] });
     expect(mocks.queryClient.invalidateQueries).toHaveBeenCalledWith({ queryKey: ["starred-messages"] });
   });
+
+  it("uses the custom checkbox control for select all", () => {
+    useMailStore.setState({ batchMode: true });
+
+    render(
+      <MessageList
+        messages={[makeMessage("m-1"), makeMessage("m-2")]}
+        selectedMessageId={null}
+        onSelectMessage={vi.fn()}
+        loading={false}
+      />,
+    );
+
+    const checkbox = screen.getByRole("checkbox", { name: "Select all" });
+
+    expect(checkbox.className).toContain("batch-checkbox");
+    expect(checkbox.className).toContain("batch-select-all-checkbox");
+    expect(checkbox.closest("label")?.className).toContain("batch-select-control");
+  });
 });

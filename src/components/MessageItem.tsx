@@ -98,12 +98,12 @@ function MessageItem({ message, labels = [], isSelected, onClick, onToggleStar, 
             type="checkbox"
             checked={batchSelected}
             aria-label={t("batch.selectMessage", "Select message")}
+            className="batch-checkbox message-row-checkbox"
             onChange={(e) => {
               e.stopPropagation();
               onToggleBatchSelect?.(message.id);
             }}
             onClick={(e) => e.stopPropagation()}
-            style={{ marginRight: "8px", flexShrink: 0, cursor: "pointer", accentColor: "var(--color-accent)" }}
           />
         )}
         <span

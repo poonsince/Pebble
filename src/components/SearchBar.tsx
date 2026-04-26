@@ -55,7 +55,7 @@ export default function SearchBar({ onSearch, onClear }: Props) {
         onClick={() => setActiveView("search")}
         title={t("search.advanced", "Advanced search")}
         aria-label={t("search.advanced", "Advanced search")}
-        className="search-toolbar-button search-toolbar-icon-button"
+        className="inbox-toolbar-button"
       >
         <SlidersHorizontal size={14} />
       </button>

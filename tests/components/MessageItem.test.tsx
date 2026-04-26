@@ -175,4 +175,28 @@ describe("MessageItem", () => {
     expect(mocks.queryClient.invalidateQueries).toHaveBeenCalledWith({ queryKey: ["starred-messages"] });
     expect(mocks.queryClient.invalidateQueries).toHaveBeenCalledWith({ queryKey: ["message", "message-1"] });
   });
+
+  it("uses the custom batch checkbox control for row selection", () => {
+    const onToggleBatchSelect = vi.fn();
+
+    render(
+      <MessageItem
+        message={makeMessage()}
+        isSelected={false}
+        onClick={vi.fn()}
+        batchMode
+        batchSelected={false}
+        onToggleBatchSelect={onToggleBatchSelect}
+      />,
+    );
+
+    const checkbox = screen.getByRole("checkbox", { name: "Select message" });
+
+    expect(checkbox.className).toContain("batch-checkbox");
+    expect(checkbox.className).toContain("message-row-checkbox");
+
+    fireEvent.click(checkbox);
+
+    expect(onToggleBatchSelect).toHaveBeenCalledWith("message-1");
+  });
 });

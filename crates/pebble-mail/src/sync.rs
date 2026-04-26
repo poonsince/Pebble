@@ -315,6 +315,22 @@ fn is_retryable_imap_connection_error(error: &PebbleError) -> bool {
         || lower == "not connected"
 }
 
+fn is_missing_imap_mailbox_error(error: &PebbleError) -> bool {
+    let PebbleError::Network(message) = error else {
+        return false;
+    };
+    let lower = message.to_ascii_lowercase();
+
+    lower.contains("folder not exist")
+        || lower.contains("mailbox does not exist")
+        || lower.contains("mailbox doesn't exist")
+        || lower.contains("no such mailbox")
+}
+
+fn should_attempt_imap_remote_folder(folder: &pebble_core::Folder) -> bool {
+    !folder.remote_id.starts_with("__local_")
+}
+
 /// Configuration for the sync worker.
 #[derive(Debug, Clone)]
 pub struct SyncConfig {
@@ -495,6 +511,9 @@ impl SyncWorker {
         folder: &pebble_core::Folder,
     ) -> Result<ImapFolderCursor> {
         let cursor = self.stored_imap_folder_cursor(folder);
+        if !should_attempt_imap_remote_folder(folder) {
+            return Ok(cursor);
+        }
         let status = self
             .provider
             .inner()
@@ -505,19 +524,6 @@ impl SyncWorker {
             status.uid_validity.map(u64::from),
             status.highest_modseq,
         ))
-    }
-
-    async fn imap_folder_cursor_for_sync(&self, folder: &pebble_core::Folder) -> ImapFolderCursor {
-        match self.try_imap_folder_cursor_for_sync(folder).await {
-            Ok(cursor) => cursor,
-            Err(e) => {
-                warn!(
-                    "Failed to read IMAP mailbox status for {}: {}",
-                    folder.name, e
-                );
-                self.stored_imap_folder_cursor(folder)
-            }
-        }
     }
 
     fn persist_imap_folder_cursor_after_sync(
@@ -610,25 +616,71 @@ impl SyncWorker {
             }
         }
 
+        let mut first_recovered_error = None;
         for folder in &ordered {
-            let cursor = self.imap_folder_cursor_for_sync(folder).await;
-            let since_uid = cursor.last_uid;
-            let limit = if since_uid.is_some() { 50 } else { 200 };
-            let notify_new = should_notify_imap_startup_fetch(since_uid);
-            match self.sync_folder(folder, since_uid, limit, notify_new).await {
-                Ok(count) => {
-                    if count > 0 {
-                        info!(
-                            "Initial sync: fetched {} messages from {}",
-                            count, folder.name
-                        );
-                    }
-                    if let Err(e) = self.persist_imap_folder_cursor_after_sync(folder, cursor) {
-                        warn!("Failed to persist IMAP cursor for {}: {}", folder.name, e);
-                    }
+            if let Err(e) = self.initial_sync_folder_with_reconnect(folder).await {
+                warn!("Initial sync folder {} failed: {}", folder.name, e);
+                if is_retryable_imap_connection_error(&e) && first_recovered_error.is_none() {
+                    first_recovered_error = Some(e);
                 }
-                Err(e) => warn!("Initial sync folder {} failed: {}", folder.name, e),
             }
+        }
+
+        if let Some(e) = first_recovered_error {
+            return Err(e);
+        }
+
+        Ok(())
+    }
+
+    async fn initial_sync_folder_with_reconnect(&self, folder: &pebble_core::Folder) -> Result<()> {
+        match self.initial_sync_folder_once(folder).await {
+            Ok(()) => Ok(()),
+            Err(e) if is_missing_imap_mailbox_error(&e) => {
+                debug!(
+                    "Skipping unavailable IMAP folder {} ({}) for account {}: {}",
+                    folder.name, folder.remote_id, self.base.account_id, e
+                );
+                Ok(())
+            }
+            Err(e) if is_retryable_imap_connection_error(&e) => {
+                warn!(
+                    "IMAP connection failed during initial sync for folder {} account {}; reconnecting before retry: {}",
+                    folder.name, self.base.account_id, e
+                );
+                let _ = self.provider.disconnect().await;
+                self.provider.connect().await?;
+                self.initial_sync_folder_once(folder).await
+            }
+            Err(e) => Err(e),
+        }
+    }
+
+    async fn initial_sync_folder_once(&self, folder: &pebble_core::Folder) -> Result<()> {
+        if !should_attempt_imap_remote_folder(folder) {
+            debug!(
+                "Skipping local-only IMAP folder {} ({}) during initial sync",
+                folder.name, folder.remote_id
+            );
+            return Ok(());
+        }
+
+        let cursor = self.try_imap_folder_cursor_for_sync(folder).await?;
+        let since_uid = cursor.last_uid;
+        let limit = if since_uid.is_some() { 50 } else { 200 };
+        let notify_new = should_notify_imap_startup_fetch(since_uid);
+        let count = self
+            .sync_folder(folder, since_uid, limit, notify_new)
+            .await?;
+
+        if count > 0 {
+            info!(
+                "Initial sync: fetched {} messages from {}",
+                count, folder.name
+            );
+        }
+        if let Err(e) = self.persist_imap_folder_cursor_after_sync(folder, cursor) {
+            warn!("Failed to persist IMAP cursor for {}: {}", folder.name, e);
         }
 
         Ok(())
@@ -636,7 +688,7 @@ impl SyncWorker {
 
     /// Check if a folder is local-only (not backed by IMAP).
     fn is_local_folder(folder: &pebble_core::Folder) -> bool {
-        folder.remote_id.starts_with("__local_")
+        !should_attempt_imap_remote_folder(folder)
     }
 
     /// Sync a folder: fetch raw messages, parse, compute threads, store.
@@ -826,16 +878,35 @@ impl SyncWorker {
             return Ok(());
         }
 
+        let mut first_recovered_error = None;
         for folder in &folders {
-            self.poll_imap_folder_with_reconnect(folder).await;
+            if let Some(e) = self.poll_imap_folder_with_reconnect(folder).await {
+                if first_recovered_error.is_none() {
+                    first_recovered_error = Some(e);
+                }
+            }
+        }
+
+        if let Some(e) = first_recovered_error {
+            return Err(e);
         }
 
         Ok(())
     }
 
-    async fn poll_imap_folder_with_reconnect(&self, folder: &pebble_core::Folder) {
+    async fn poll_imap_folder_with_reconnect(
+        &self,
+        folder: &pebble_core::Folder,
+    ) -> Option<PebbleError> {
         match self.poll_imap_folder_once(folder).await {
-            Ok(()) => {}
+            Ok(()) => None,
+            Err(e) if is_missing_imap_mailbox_error(&e) => {
+                debug!(
+                    "Skipping unavailable IMAP folder {} ({}) for account {}: {}",
+                    folder.name, folder.remote_id, self.base.account_id, e
+                );
+                None
+            }
             Err(e) if is_retryable_imap_connection_error(&e) => {
                 warn!(
                     "IMAP connection failed while polling folder {} account {}; reconnecting before retry: {}",
@@ -849,24 +920,40 @@ impl SyncWorker {
                                 "Poll retry failed for folder {} account {} after reconnect: {}",
                                 folder.name, self.base.account_id, retry_error
                             );
+                            if is_retryable_imap_connection_error(&retry_error) {
+                                return Some(retry_error);
+                            }
                         }
+                        None
                     }
                     Err(reconnect_error) => {
                         warn!(
                             "Reconnect failed while polling folder {} account {}: {}",
                             folder.name, self.base.account_id, reconnect_error
                         );
+                        Some(reconnect_error)
                     }
                 }
             }
-            Err(e) => warn!(
-                "Poll failed for folder {} account {}: {}",
-                folder.name, self.base.account_id, e
-            ),
+            Err(e) => {
+                warn!(
+                    "Poll failed for folder {} account {}: {}",
+                    folder.name, self.base.account_id, e
+                );
+                None
+            }
         }
     }
 
     async fn poll_imap_folder_once(&self, folder: &pebble_core::Folder) -> Result<()> {
+        if !should_attempt_imap_remote_folder(folder) {
+            debug!(
+                "Skipping local-only IMAP folder {} ({}) during poll",
+                folder.name, folder.remote_id
+            );
+            return Ok(());
+        }
+
         let cursor = self.try_imap_folder_cursor_for_sync(folder).await?;
         let since_uid = cursor.last_uid;
 
@@ -892,6 +979,29 @@ impl SyncWorker {
     /// When they differ (or on the first sync), a full flag fetch is performed
     /// and the new MODSEQ is persisted in the cursor.
     async fn reconcile_folder(&self, folder: &pebble_core::Folder) -> Result<()> {
+        match self.reconcile_folder_once(folder).await {
+            Ok(()) => Ok(()),
+            Err(e) if is_missing_imap_mailbox_error(&e) => {
+                debug!(
+                    "Skipping unavailable IMAP folder {} ({}) during reconcile for account {}: {}",
+                    folder.name, folder.remote_id, self.base.account_id, e
+                );
+                Ok(())
+            }
+            Err(e) if is_retryable_imap_connection_error(&e) => {
+                warn!(
+                    "IMAP connection failed while reconciling folder {} account {}; reconnecting before retry: {}",
+                    folder.name, self.base.account_id, e
+                );
+                let _ = self.provider.disconnect().await;
+                self.provider.connect().await?;
+                self.reconcile_folder_once(folder).await
+            }
+            Err(e) => Err(e),
+        }
+    }
+
+    async fn reconcile_folder_once(&self, folder: &pebble_core::Folder) -> Result<()> {
         // Skip local-only folders
         if Self::is_local_folder(folder) {
             return Ok(());
@@ -1587,5 +1697,33 @@ mod tests {
         );
 
         assert!(!is_retryable_imap_connection_error(&error));
+    }
+
+    #[test]
+    fn imap_missing_folder_select_error_is_detected_for_suppression() {
+        let error = pebble_core::PebbleError::Network(
+            "SELECT failed: no response: code: None, info: Some(\"SELECT Folder not exist\")"
+                .to_string(),
+        );
+
+        assert!(is_missing_imap_mailbox_error(&error));
+    }
+
+    #[test]
+    fn imap_local_archive_is_not_a_remote_sync_target() {
+        let folder = pebble_core::Folder {
+            id: "folder-1".to_string(),
+            account_id: "account-1".to_string(),
+            remote_id: "__local_archive__".to_string(),
+            name: "Archive".to_string(),
+            folder_type: pebble_core::FolderType::Folder,
+            role: Some(pebble_core::FolderRole::Archive),
+            parent_id: None,
+            color: None,
+            is_system: true,
+            sort_order: 3,
+        };
+
+        assert!(!should_attempt_imap_remote_folder(&folder));
     }
 }

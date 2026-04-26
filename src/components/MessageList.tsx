@@ -161,16 +161,18 @@ export default function MessageList({
           padding: "6px 10px", borderBottom: "1px solid var(--color-border)",
           backgroundColor: "var(--color-bg)", flexShrink: 0,
         }}>
-          <input
-            type="checkbox"
-            checked={allSelected}
-            onChange={() => allSelected ? clearSelection() : selectAllMessages(messageIds)}
-            aria-label={t("batch.selectAll", "Select all")}
-            style={{ cursor: "pointer", accentColor: "var(--color-accent)" }}
-          />
-          <span style={{ fontSize: "12px", color: "var(--color-text-secondary)", marginRight: "auto" }}>
-            {selectedMessageIds.size > 0 ? t("batch.selected", { count: selectedMessageIds.size }) : t("batch.selectAll")}
-          </span>
+          <label className="batch-select-control">
+            <input
+              type="checkbox"
+              checked={allSelected}
+              onChange={() => allSelected ? clearSelection() : selectAllMessages(messageIds)}
+              aria-label={t("batch.selectAll", "Select all")}
+              className="batch-checkbox batch-select-all-checkbox"
+            />
+            <span>
+              {selectedMessageIds.size > 0 ? t("batch.selected", { count: selectedMessageIds.size }) : t("batch.selectAll")}
+            </span>
+          </label>
           {selectedMessageIds.size > 0 && (
             <>
               <BatchBtn icon={Archive} label={t("messageActions.archive")} onClick={() => handleBatchAction("archive")} disabled={batchLoading} />
