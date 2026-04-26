@@ -12,7 +12,7 @@ use tracing::{info, warn};
 
 use crate::backoff::SyncBackoff;
 use crate::gmail_sync::TokenRefresher;
-use crate::provider::outlook::{OutlookDeltaPage, OutlookProvider};
+use crate::provider::outlook::{should_hide_outlook_folder, OutlookDeltaPage, OutlookProvider};
 use crate::realtime_policy::{RealtimePollPolicy, RealtimeRuntimeState, SyncTrigger};
 use crate::sync::{
     persist_message_attachments_async, recv_sync_trigger, StoredMessage, SyncConfig, SyncError,
@@ -80,6 +80,12 @@ async fn wait_for_outlook_policy_delay(
             SyncWaitOutcome::ContextChanged => continue,
         }
     }
+}
+
+fn should_sync_outlook_folder(folder: &Folder) -> bool {
+    folder.role.is_some()
+        || folder.remote_id.starts_with("__local_")
+        || !should_hide_outlook_folder(Some(&folder.name), None)
 }
 
 async fn collect_outlook_delta_pages<F, Fut>(
@@ -526,7 +532,10 @@ impl OutlookSyncWorker {
                 .base
                 .store
                 .list_folders(&self.base.account_id)
-                .unwrap_or_default();
+                .unwrap_or_default()
+                .into_iter()
+                .filter(should_sync_outlook_folder)
+                .collect::<Vec<_>>();
             let mut sync_failure_count = 0u32;
 
             for folder in &db_folders {
@@ -711,6 +720,26 @@ mod tests {
             is_system: true,
             sort_order: 0,
         }
+    }
+
+    #[test]
+    fn outlook_sync_skips_hidden_service_folders_from_existing_store_rows() {
+        let mut conversation_history = make_folder("conversation-history-id");
+        conversation_history.name = "对话历史记录".to_string();
+        conversation_history.role = None;
+
+        let mut remote_outbox = make_folder("remote-outbox-id");
+        remote_outbox.name = "发件箱".to_string();
+        remote_outbox.role = None;
+
+        let mut local_outbox = make_folder("__local_outbox__");
+        local_outbox.name = "Outbox".to_string();
+        local_outbox.role = None;
+
+        assert!(!should_sync_outlook_folder(&conversation_history));
+        assert!(!should_sync_outlook_folder(&remote_outbox));
+        assert!(should_sync_outlook_folder(&local_outbox));
+        assert!(should_sync_outlook_folder(&make_folder("inbox-id")));
     }
 
     #[tokio::test]

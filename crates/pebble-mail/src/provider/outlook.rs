@@ -638,6 +638,12 @@ impl FolderProvider for OutlookProvider {
         Ok(folder_list
             .value
             .iter()
+            .filter(|gf| {
+                !should_hide_outlook_folder(
+                    gf.display_name.as_deref(),
+                    gf.well_known_name.as_deref(),
+                )
+            })
             .map(|gf| graph_folder_to_folder(gf, account_id))
             .collect())
     }
@@ -1120,11 +1126,32 @@ fn well_known_name_to_role(name: &str) -> Option<FolderRole> {
     }
 }
 
+pub fn should_hide_outlook_folder(
+    display_name: Option<&str>,
+    well_known_name: Option<&str>,
+) -> bool {
+    let well_known = well_known_name.unwrap_or_default().trim().to_lowercase();
+    if matches!(well_known.as_str(), "outbox" | "conversationhistory") {
+        return true;
+    }
+
+    let display_name = display_name.unwrap_or_default().trim().to_lowercase();
+    matches!(
+        display_name.as_str(),
+        "outbox" | "发件箱" | "conversation history" | "对话历史记录"
+    )
+}
+
 fn graph_folder_to_folder(gf: &GraphFolder, account_id: &str) -> Folder {
     let role = gf
         .well_known_name
         .as_deref()
-        .and_then(well_known_name_to_role);
+        .and_then(well_known_name_to_role)
+        .or_else(|| {
+            gf.display_name
+                .as_deref()
+                .and_then(crate::imap::detect_folder_role)
+        });
     let is_system = role.is_some();
     let sort_order = crate::imap::folder_sort_order(&role);
     Folder {
@@ -1395,6 +1422,57 @@ mod tests {
         assert!(!folder.is_system);
         assert_eq!(folder.name, "My Folder");
         assert_eq!(folder.account_id, "acct-123");
+    }
+
+    #[test]
+    fn test_graph_folder_to_folder_detects_localized_system_names() {
+        let spam = GraphFolder {
+            id: "junk-id".to_string(),
+            display_name: Some("垃圾邮件".to_string()),
+            total_item_count: Some(0),
+            child_folder_count: Some(0),
+            well_known_name: None,
+        };
+        let archive = GraphFolder {
+            id: "archive-id".to_string(),
+            display_name: Some("存档".to_string()),
+            total_item_count: Some(0),
+            child_folder_count: Some(0),
+            well_known_name: None,
+        };
+        let conversation_history = GraphFolder {
+            id: "conversation-history-id".to_string(),
+            display_name: Some("对话历史记录".to_string()),
+            total_item_count: Some(0),
+            child_folder_count: Some(0),
+            well_known_name: None,
+        };
+
+        let spam_folder = graph_folder_to_folder(&spam, "acct-123");
+        let archive_folder = graph_folder_to_folder(&archive, "acct-123");
+        let history_folder = graph_folder_to_folder(&conversation_history, "acct-123");
+
+        assert_eq!(spam_folder.role, Some(FolderRole::Spam));
+        assert!(spam_folder.is_system);
+        assert_eq!(archive_folder.role, Some(FolderRole::Archive));
+        assert!(archive_folder.is_system);
+        assert_eq!(history_folder.role, None);
+        assert!(!history_folder.is_system);
+    }
+
+    #[test]
+    fn test_should_hide_outlook_folder_skips_non_mail_system_folders() {
+        assert!(should_hide_outlook_folder(Some("Outbox"), Some("outbox")));
+        assert!(should_hide_outlook_folder(Some("发件箱"), None));
+        assert!(should_hide_outlook_folder(
+            Some("Conversation History"),
+            Some("conversationhistory")
+        ));
+        assert!(should_hide_outlook_folder(Some("对话历史记录"), None));
+
+        assert!(!should_hide_outlook_folder(Some("Inbox"), Some("inbox")));
+        assert!(!should_hide_outlook_folder(Some("垃圾邮件"), None));
+        assert!(!should_hide_outlook_folder(Some("Project"), None));
     }
 
     #[test]
