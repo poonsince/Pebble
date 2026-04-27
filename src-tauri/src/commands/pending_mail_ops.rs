@@ -775,7 +775,9 @@ mod tests {
         store.insert_folder(&inbox).unwrap();
         store.insert_folder(&archive).unwrap();
         let message = test_message(&account.id);
-        store.insert_message(&message, &[inbox.id.clone()]).unwrap();
+        store
+            .insert_message(&message, std::slice::from_ref(&inbox.id))
+            .unwrap();
 
         let op_id = store
             .insert_pending_mail_op(

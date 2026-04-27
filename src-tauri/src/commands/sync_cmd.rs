@@ -324,6 +324,7 @@ impl RealtimePreferenceStartSummary {
 /// Extracted so that any `?` propagation (token decode, config parse, etc.)
 /// returns `Err` to the caller, which can then remove the placeholder entry
 /// from `sync_handles` before propagating the error.
+#[allow(clippy::too_many_arguments)]
 fn build_sync_task(
     state: &AppState,
     store: Arc<Store>,
@@ -810,16 +811,20 @@ mod trigger_tests {
 
     #[test]
     fn imap_initial_status_is_polling_until_idle_is_confirmed() {
-        let mut config = SyncConfig::default();
-        config.poll_interval_secs = 10;
+        let config = SyncConfig {
+            poll_interval_secs: 10,
+            ..Default::default()
+        };
 
         assert_eq!(imap_initial_realtime_mode(&config), RealtimeMode::Polling);
     }
 
     #[test]
     fn imap_capability_status_reports_realtime_only_when_idle_is_available() {
-        let mut config = SyncConfig::default();
-        config.poll_interval_secs = 10;
+        let config = SyncConfig {
+            poll_interval_secs: 10,
+            ..Default::default()
+        };
 
         assert_eq!(
             imap_capability_realtime_mode(&config, true),

@@ -13,22 +13,17 @@ use tokio_rustls::client::TlsStream;
 use tracing::debug;
 
 /// Connection security mode for mail protocols.
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ConnectionSecurity {
     /// Implicit TLS — connect over TLS immediately (IMAP 993, SMTP 465).
+    #[default]
     Tls,
     /// STARTTLS — connect plain then upgrade to TLS (IMAP 143, SMTP 587).
     #[serde(rename = "starttls")]
     StartTls,
     /// No encryption (not recommended).
     Plain,
-}
-
-impl Default for ConnectionSecurity {
-    fn default() -> Self {
-        Self::Tls
-    }
 }
 
 /// Optional SOCKS5 proxy configuration.
@@ -85,7 +80,7 @@ impl<'de> serde::Deserialize<'de> for ImapConfig {
         }
 
         let raw = Raw::deserialize(deserializer)?;
-        let security = raw.security.unwrap_or_else(|| match raw.use_tls {
+        let security = raw.security.unwrap_or(match raw.use_tls {
             Some(false) => ConnectionSecurity::Plain,
             _ => ConnectionSecurity::Tls,
         });
@@ -148,7 +143,7 @@ impl<'de> serde::Deserialize<'de> for SmtpConfig {
         }
 
         let raw = Raw::deserialize(deserializer)?;
-        let security = raw.security.unwrap_or_else(|| match raw.use_tls {
+        let security = raw.security.unwrap_or(match raw.use_tls {
             Some(false) => ConnectionSecurity::Plain,
             _ => ConnectionSecurity::Tls,
         });
@@ -223,7 +218,7 @@ impl<T: AsyncWrite + Unpin> AsyncWrite for PrefixedStream<T> {
 /// generic over a single type, so every operation site can drop the old
 /// `match self.session { Tls(_) => ..., Plain(_) => ... }` duplication.
 enum InnerStream {
-    Tls(TlsStream<TcpStream>),
+    Tls(Box<TlsStream<TcpStream>>),
     Plain(TcpStream),
 }
 
@@ -243,7 +238,7 @@ impl AsyncRead for InnerStream {
         buf: &mut ReadBuf<'_>,
     ) -> Poll<io::Result<()>> {
         match self.get_mut() {
-            InnerStream::Tls(s) => Pin::new(s).poll_read(cx, buf),
+            InnerStream::Tls(s) => Pin::new(s.as_mut()).poll_read(cx, buf),
             InnerStream::Plain(s) => Pin::new(s).poll_read(cx, buf),
         }
     }
@@ -256,21 +251,21 @@ impl AsyncWrite for InnerStream {
         buf: &[u8],
     ) -> Poll<io::Result<usize>> {
         match self.get_mut() {
-            InnerStream::Tls(s) => Pin::new(s).poll_write(cx, buf),
+            InnerStream::Tls(s) => Pin::new(s.as_mut()).poll_write(cx, buf),
             InnerStream::Plain(s) => Pin::new(s).poll_write(cx, buf),
         }
     }
 
     fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
         match self.get_mut() {
-            InnerStream::Tls(s) => Pin::new(s).poll_flush(cx),
+            InnerStream::Tls(s) => Pin::new(s.as_mut()).poll_flush(cx),
             InnerStream::Plain(s) => Pin::new(s).poll_flush(cx),
         }
     }
 
     fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
         match self.get_mut() {
-            InnerStream::Tls(s) => Pin::new(s).poll_shutdown(cx),
+            InnerStream::Tls(s) => Pin::new(s.as_mut()).poll_shutdown(cx),
             InnerStream::Plain(s) => Pin::new(s).poll_shutdown(cx),
         }
     }
@@ -303,16 +298,6 @@ fn build_tls_connector() -> Result<tokio_rustls::TlsConnector> {
         .with_root_certificates(root_store)
         .with_no_client_auth();
     Ok(tokio_rustls::TlsConnector::from(Arc::new(config)))
-}
-
-#[cfg(test)]
-mod tls_config_tests {
-    use super::build_tls_connector;
-
-    #[test]
-    fn build_tls_connector_returns_result() {
-        assert!(build_tls_connector().is_ok());
-    }
 }
 
 /// Perform a TLS handshake using rustls on the given TCP stream.
@@ -510,7 +495,8 @@ impl ImapProvider {
                 } else {
                     Vec::new()
                 };
-                let stream = PrefixedStream::with_prefix(prefix, InnerStream::Tls(tls_stream));
+                let stream =
+                    PrefixedStream::with_prefix(prefix, InnerStream::Tls(Box::new(tls_stream)));
 
                 let client = Client::new(stream);
                 client
@@ -566,7 +552,8 @@ impl ImapProvider {
                     Self::starttls_upgrade(&self.config.host, tcp, greeting).await?;
 
                 // Replay the original greeting so Client::new() is happy
-                let stream = PrefixedStream::with_prefix(greeting, InnerStream::Tls(tls_stream));
+                let stream =
+                    PrefixedStream::with_prefix(greeting, InnerStream::Tls(Box::new(tls_stream)));
                 let client = Client::new(stream);
                 client
                     .login(&self.config.username, &self.config.password)
@@ -1456,5 +1443,15 @@ pub fn folder_sort_order(role: &Option<FolderRole>) -> i32 {
         Some(FolderRole::Spam) => 4,
         Some(FolderRole::Trash) => 5,
         None => 100,
+    }
+}
+
+#[cfg(test)]
+mod tls_config_tests {
+    use super::build_tls_connector;
+
+    #[test]
+    fn build_tls_connector_returns_result() {
+        assert!(build_tls_connector().is_ok());
     }
 }

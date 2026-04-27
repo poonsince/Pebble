@@ -302,7 +302,9 @@ mod tests {
             created_at: now,
             updated_at: now,
         };
-        store.insert_message(&msg, &[folder.id.clone()]).unwrap();
+        store
+            .insert_message(&msg, std::slice::from_ref(&folder.id))
+            .unwrap();
         let messages = store.list_messages_by_folder(&folder.id, 50, 0).unwrap();
         assert_eq!(messages.len(), 1);
         assert_eq!(messages[0].subject, "Hello World");

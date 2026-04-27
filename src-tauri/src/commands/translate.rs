@@ -6,7 +6,7 @@ use tauri::State;
 
 /// Decode a hex string to bytes.
 fn hex_decode(s: &str) -> std::result::Result<Vec<u8>, PebbleError> {
-    if s.len() % 2 != 0 {
+    if !s.len().is_multiple_of(2) {
         return Err(PebbleError::Internal(
             "Invalid hex string length".to_string(),
         ));
@@ -130,9 +130,8 @@ fn validate_translate_url(url: &str) -> std::result::Result<(), PebbleError> {
     if url.starts_with("https://") {
         return Ok(());
     }
-    if url.starts_with("http://") {
+    if let Some(after_scheme) = url.strip_prefix("http://") {
         // Extract host from http://host[:port]/...
-        let after_scheme = &url[7..];
         let host = after_scheme
             .split('/')
             .next()

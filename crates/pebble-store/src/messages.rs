@@ -4,6 +4,8 @@ use std::collections::HashMap;
 
 use crate::Store;
 
+pub type FolderRemoteMessageState = (String, String, bool, bool, i64);
+
 /// Maps a row to a Message. Column order must match the SELECT lists used below.
 ///
 /// Expected column indices:
@@ -802,7 +804,7 @@ impl Store {
         &self,
         account_id: &str,
         folder_id: &str,
-    ) -> Result<Vec<(String, String, bool, bool, i64)>> {
+    ) -> Result<Vec<FolderRemoteMessageState>> {
         self.with_read(|conn| {
             let mut stmt = conn.prepare(
                 "SELECT m.id, m.remote_id, m.is_read, m.is_starred, m.updated_at
@@ -1376,7 +1378,9 @@ mod remote_id_scope_tests {
         store.insert_folder(&sent).unwrap();
 
         let msg = make_message(&account.id, "123");
-        store.insert_message(&msg, &[inbox.id.clone()]).unwrap();
+        store
+            .insert_message(&msg, std::slice::from_ref(&inbox.id))
+            .unwrap();
 
         let remote_ids = vec!["123".to_string()];
         let inbox_matches = store
@@ -1414,7 +1418,11 @@ mod remote_id_scope_tests {
             is_inline: false,
         };
         store
-            .replace_message_with_attachments(&msg, &[drafts.id.clone()], &[old_attachment])
+            .replace_message_with_attachments(
+                &msg,
+                std::slice::from_ref(&drafts.id),
+                &[old_attachment],
+            )
             .unwrap();
 
         let mut updated = msg.clone();
@@ -1430,7 +1438,11 @@ mod remote_id_scope_tests {
             is_inline: false,
         };
         store
-            .replace_message_with_attachments(&updated, &[drafts.id.clone()], &[new_attachment])
+            .replace_message_with_attachments(
+                &updated,
+                std::slice::from_ref(&drafts.id),
+                &[new_attachment],
+            )
             .unwrap();
 
         let fetched = store.get_message(&updated.id).unwrap().unwrap();
@@ -1501,7 +1513,9 @@ mod tombstone_tests {
             created_at: now,
             updated_at: now,
         };
-        store.insert_message(&msg, &[folder.id.clone()]).unwrap();
+        store
+            .insert_message(&msg, std::slice::from_ref(&folder.id))
+            .unwrap();
         (store, msg.id)
     }
 
@@ -1518,7 +1532,7 @@ mod tombstone_tests {
 
     #[test]
     fn test_recent_tombstone_not_purged() {
-        let one_day_ago = pebble_core::now_timestamp() - (1 * 24 * 3600);
+        let one_day_ago = pebble_core::now_timestamp() - (24 * 3600);
         let (store, msg_id) = setup_store_with_message(true, Some(one_day_ago));
         let purged = store.purge_old_tombstones(30 * 24 * 3600).unwrap();
         assert_eq!(purged, 0);
@@ -1610,9 +1624,15 @@ mod thread_listing_tests {
         let m1 = make_msg(&account_id, &thread_id, "alice@example.com", base - 200);
         let m2 = make_msg(&account_id, &thread_id, "bob@example.com", base - 100);
         let m3 = make_msg(&account_id, &thread_id, "alice@example.com", base);
-        store.insert_message(&m1, &[folder_id.clone()]).unwrap();
-        store.insert_message(&m2, &[folder_id.clone()]).unwrap();
-        store.insert_message(&m3, &[folder_id.clone()]).unwrap();
+        store
+            .insert_message(&m1, std::slice::from_ref(&folder_id))
+            .unwrap();
+        store
+            .insert_message(&m2, std::slice::from_ref(&folder_id))
+            .unwrap();
+        store
+            .insert_message(&m3, std::slice::from_ref(&folder_id))
+            .unwrap();
 
         let threads = store
             .list_threads_by_folder(&folder_id, 50, 0)
@@ -1654,10 +1674,11 @@ mod thread_listing_tests {
         let base = now_timestamp();
         let m1 = make_msg(&account_id, &thread_id, "alice@example.com", base - 60);
         let m2 = make_msg(&account_id, &thread_id, "bob@example.com", base);
+        let m1_folder_ids = [inbox_id.clone(), archive.id.clone()];
+        store.insert_message(&m1, &m1_folder_ids).unwrap();
         store
-            .insert_message(&m1, &[inbox_id.clone(), archive.id.clone()])
+            .insert_message(&m2, std::slice::from_ref(&archive.id))
             .unwrap();
-        store.insert_message(&m2, &[archive.id.clone()]).unwrap();
 
         let threads = store
             .list_threads_by_folders(&[inbox_id, archive.id], 50, 0)

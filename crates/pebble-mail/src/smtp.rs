@@ -291,16 +291,6 @@ fn build_rustls_client_config() -> Result<std::sync::Arc<rustls::ClientConfig>> 
     Ok(std::sync::Arc::new(config))
 }
 
-#[cfg(test)]
-mod tls_config_tests {
-    use super::build_rustls_client_config;
-
-    #[test]
-    fn build_rustls_client_config_returns_result() {
-        assert!(build_rustls_client_config().is_ok());
-    }
-}
-
 // ---------------------------------------------------------------------------
 // Stream wrappers that implement AsyncTokioStream for lettre
 // ---------------------------------------------------------------------------
@@ -455,5 +445,15 @@ fn mime_type_from_extension(ext: &str) -> ContentType {
         "xml" => ContentType::parse("application/xml").unwrap(),
         "eml" => ContentType::parse("message/rfc822").unwrap(),
         _ => ContentType::parse("application/octet-stream").unwrap(),
+    }
+}
+
+#[cfg(test)]
+mod tls_config_tests {
+    use super::build_rustls_client_config;
+
+    #[test]
+    fn build_rustls_client_config_returns_result() {
+        assert!(build_rustls_client_config().is_ok());
     }
 }

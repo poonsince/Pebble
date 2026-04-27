@@ -54,6 +54,7 @@ fn hard_delete_local_draft(state: &AppState, draft_id: &str) {
 }
 
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub async fn save_draft(
     state: State<'_, AppState>,
     account_id: String,

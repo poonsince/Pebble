@@ -171,7 +171,9 @@ mod tests {
             created_at: now,
             updated_at: now,
         };
-        store.insert_message(&msg1, &[folder.id.clone()]).unwrap();
+        store
+            .insert_message(&msg1, std::slice::from_ref(&folder.id))
+            .unwrap();
 
         // Message from charlie
         let msg2 = Message {
@@ -205,7 +207,9 @@ mod tests {
             created_at: now,
             updated_at: now,
         };
-        store.insert_message(&msg2, &[folder.id.clone()]).unwrap();
+        store
+            .insert_message(&msg2, std::slice::from_ref(&folder.id))
+            .unwrap();
 
         (store, account.id)
     }

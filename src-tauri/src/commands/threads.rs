@@ -27,6 +27,6 @@ pub async fn list_threads(
         Some(ids) if !ids.is_empty() => store.list_threads_by_folders(&ids, limit, offset),
         _ => store.list_threads_by_folder(&folder_id, limit, offset),
     })
-        .await
-        .map_err(|e| PebbleError::Internal(format!("Task join error: {e}")))?
+    .await
+    .map_err(|e| PebbleError::Internal(format!("Task join error: {e}")))?
 }

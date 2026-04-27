@@ -1021,7 +1021,7 @@ fn build_raw_message(msg: &OutgoingMessage) -> Result<Vec<u8>> {
 
 fn base64_standard_encode(data: &[u8]) -> String {
     const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let mut out = String::with_capacity((data.len() + 2) / 3 * 4);
+    let mut out = String::with_capacity(data.len().div_ceil(3) * 4);
     for chunk in data.chunks(3) {
         let b0 = chunk[0] as u32;
         let b1 = if chunk.len() > 1 { chunk[1] as u32 } else { 0 };
@@ -1109,10 +1109,10 @@ fn base64url_decode(input: &str) -> Vec<u8> {
     let chunks = bytes.chunks(4);
     for chunk in chunks {
         if chunk.len() >= 2 {
-            let b0 = (chunk[0] as u32) << 18
-                | (chunk[1] as u32) << 12
-                | chunk.get(2).copied().unwrap_or(0) as u32 * 64
-                | chunk.get(3).copied().unwrap_or(0) as u32;
+            let b0 = ((chunk[0] as u32) << 18)
+                | ((chunk[1] as u32) << 12)
+                | ((chunk.get(2).copied().unwrap_or(0) as u32) << 6)
+                | (chunk.get(3).copied().unwrap_or(0) as u32);
             buf.push((b0 >> 16) as u8);
             if chunk.len() >= 3 {
                 buf.push((b0 >> 8) as u8);

@@ -172,7 +172,9 @@ mod tests {
             created_at: now,
             updated_at: now,
         };
-        store.insert_message(&msg, &[folder.id.clone()]).unwrap();
+        store
+            .insert_message(&msg, std::slice::from_ref(&folder.id))
+            .unwrap();
         (store, msg_id)
     }
 

@@ -60,25 +60,6 @@ fn get_index_path(app: &tauri::App) -> Result<PathBuf, Box<dyn std::error::Error
     Ok(index_dir)
 }
 
-#[cfg(test)]
-mod startup_timing_tests {
-    use super::startup_phase_timing;
-    use std::time::{Duration, Instant};
-
-    #[test]
-    fn startup_phase_timing_reports_phase_and_total_elapsed_ms() {
-        let start = Instant::now();
-        let phase_start = start + Duration::from_millis(75);
-        let now = start + Duration::from_millis(250);
-
-        let timing = startup_phase_timing("search index opened", start, phase_start, now);
-
-        assert_eq!(timing.label, "search index opened");
-        assert_eq!(timing.phase_ms, 175);
-        assert_eq!(timing.total_ms, 250);
-    }
-}
-
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -339,4 +320,23 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod startup_timing_tests {
+    use super::startup_phase_timing;
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn startup_phase_timing_reports_phase_and_total_elapsed_ms() {
+        let start = Instant::now();
+        let phase_start = start + Duration::from_millis(75);
+        let now = start + Duration::from_millis(250);
+
+        let timing = startup_phase_timing("search index opened", start, phase_start, now);
+
+        assert_eq!(timing.label, "search index opened");
+        assert_eq!(timing.phase_ms, 175);
+        assert_eq!(timing.total_ms, 250);
+    }
 }

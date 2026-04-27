@@ -25,9 +25,7 @@ pub fn gmail_move_label_delta(
         };
     }
 
-    let target = match target_role {
-        _ => valid_gmail_label(target_remote_id),
-    };
+    let target = valid_gmail_label(target_remote_id);
     let source = source_remote_id.and_then(valid_gmail_label);
 
     let mut add_labels = Vec::new();

@@ -505,18 +505,16 @@ impl OutlookSyncWorker {
                                 SyncWaitOutcome::ContextChanged => continue,
                             }
                         }
-                    } else {
-                        if wait_for_outlook_policy_delay(
-                            &policy,
-                            &backoff,
-                            &mut runtime,
-                            &mut stop_rx,
-                            &mut trigger_rx,
-                        )
-                        .await
-                        {
-                            break 'sync_loop;
-                        }
+                    } else if wait_for_outlook_policy_delay(
+                        &policy,
+                        &backoff,
+                        &mut runtime,
+                        &mut stop_rx,
+                        &mut trigger_rx,
+                    )
+                    .await
+                    {
+                        break 'sync_loop;
                     }
                     continue;
                 }
@@ -804,7 +802,7 @@ mod tests {
         store.insert_account(&account).unwrap();
         store.insert_folder(&folder).unwrap();
         store
-            .insert_message(&message, &[folder.id.clone()])
+            .insert_message(&message, std::slice::from_ref(&folder.id))
             .unwrap();
 
         let outcome = apply_outlook_deleted_remote_ids(

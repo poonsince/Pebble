@@ -18,12 +18,12 @@ impl CryptoService {
 
     /// Encrypt plaintext bytes.
     pub fn encrypt(&self, plaintext: &[u8]) -> Result<Vec<u8>> {
-        aes::encrypt(&*self.dek, plaintext)
+        aes::encrypt(&self.dek, plaintext)
     }
 
     /// Decrypt ciphertext bytes.
     pub fn decrypt(&self, ciphertext: &[u8]) -> Result<Vec<u8>> {
-        aes::decrypt(&*self.dek, ciphertext)
+        aes::decrypt(&self.dek, ciphertext)
     }
 }
 

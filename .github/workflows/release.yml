@@ -1,0 +1,140 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    name: Windows Release
+    runs-on: windows-latest
+
+    defaults:
+      run:
+        shell: pwsh
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9.12.3
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+
+      - name: Validate release version
+        run: |
+          $ErrorActionPreference = "Stop"
+          $tag = "${{ github.ref_name }}"
+          if ($tag -notmatch '^v(?<version>\d+\.\d+\.\d+)$') {
+            throw "Release tags must use vMAJOR.MINOR.PATCH, got '$tag'."
+          }
+          $version = $Matches.version
+
+          $packageVersion = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          $tauriVersion = (Get-Content src-tauri/tauri.conf.json -Raw | ConvertFrom-Json).version
+          $cargoToml = Get-Content src-tauri/Cargo.toml -Raw
+          if ($cargoToml -notmatch '(?m)^version\s*=\s*"(?<version>[^"]+)"') {
+            throw "Could not read src-tauri/Cargo.toml package version."
+          }
+          $cargoVersion = $Matches.version
+
+          $versions = @{
+            "package.json" = $packageVersion
+            "src-tauri/tauri.conf.json" = $tauriVersion
+            "src-tauri/Cargo.toml" = $cargoVersion
+          }
+          foreach ($entry in $versions.GetEnumerator()) {
+            if ($entry.Value -ne $version) {
+              throw "$($entry.Key) version '$($entry.Value)' does not match tag '$tag'."
+            }
+          }
+          "PEBBLE_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Check Rust formatting
+        run: cargo fmt --check
+
+      - name: Check Rust lints
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Run Rust tests
+        run: cargo test --workspace --all-targets
+
+      - name: Run frontend tests
+        run: pnpm test
+
+      - name: Build Windows installer
+        run: pnpm build
+
+      - name: Collect release artifacts
+        run: |
+          $ErrorActionPreference = "Stop"
+          $artifactDir = "release-artifacts"
+          New-Item -ItemType Directory -Force -Path $artifactDir | Out-Null
+
+          $installers = Get-ChildItem -Path "target/release/bundle/nsis" -Filter "*.exe" -File
+          if ($installers.Count -eq 0) {
+            throw "No NSIS installer found in target/release/bundle/nsis."
+          }
+
+          foreach ($installer in $installers) {
+            Copy-Item -Path $installer.FullName -Destination $artifactDir
+          }
+
+          Get-ChildItem -Path $artifactDir -File | ForEach-Object {
+            $hash = (Get-FileHash -Path $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+            "$hash  $($_.Name)" | Set-Content -Path "$($_.FullName).sha256" -Encoding ascii
+          }
+
+          Get-ChildItem -Path $artifactDir -File | Select-Object Name, Length
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pebble-windows-${{ env.PEBBLE_VERSION }}
+          path: release-artifacts/*
+          if-no-files-found: error
+
+      - name: Create or update GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $tag = "${{ github.ref_name }}"
+          $title = "Pebble $tag"
+          $notes = @"
+          Windows installer for Pebble $tag.
+
+          This build is not code-signed yet. Verify the installer with the attached SHA256 checksum before installing.
+          "@
+
+          gh release view $tag *> $null
+          if ($LASTEXITCODE -eq 0) {
+            gh release edit $tag --title $title --notes $notes
+            gh release upload $tag release-artifacts/* --clobber
+          } else {
+            gh release create $tag release-artifacts/* --title $title --notes $notes
+          }

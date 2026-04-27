@@ -284,6 +284,7 @@ pub async fn add_account(
 }
 
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub async fn update_account(
     state: State<'_, AppState>,
     account_id: String,

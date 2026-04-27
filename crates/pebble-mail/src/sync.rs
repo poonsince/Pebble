@@ -79,10 +79,7 @@ pub(crate) fn sanitize_filename(name: &str) -> String {
     }
 
     // Take only the last component if there are path separators
-    let base = name
-        .rsplit(|c: char| c == '/' || c == '\\')
-        .next()
-        .unwrap_or(name);
+    let base = name.rsplit(['/', '\\']).next().unwrap_or(name);
     // Reject if the component is exactly ".."
     if base == ".." || base == "." {
         return "unnamed_attachment".to_string();
@@ -1558,8 +1555,10 @@ mod tests {
 
     #[test]
     fn zero_poll_interval_is_manual_only() {
-        let mut config = SyncConfig::default();
-        config.poll_interval_secs = 0;
+        let config = SyncConfig {
+            poll_interval_secs: 0,
+            ..Default::default()
+        };
 
         assert!(config.manual_only());
     }
@@ -1636,8 +1635,10 @@ mod tests {
 
     #[test]
     fn imap_polling_fallback_uses_realtime_policy_delays() {
-        let mut config = SyncConfig::default();
-        config.poll_interval_secs = 60;
+        let config = SyncConfig {
+            poll_interval_secs: 60,
+            ..Default::default()
+        };
         let policy = imap_poll_policy(&config);
 
         assert_eq!(
