@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="site/screenshots/main.png" alt="Pebble 收件箱预览" width="800">
+  <img src="src/assets/app-icon.png" alt="Pebble logo" width="120">
 </p>
 
 <h1 align="center">Pebble</h1>
