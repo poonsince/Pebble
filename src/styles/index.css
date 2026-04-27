@@ -47,6 +47,56 @@ html, body, #root {
   background: var(--color-main-bg);
 }
 
+input,
+textarea,
+select,
+option {
+  color-scheme: light dark;
+}
+
+input,
+textarea,
+select {
+  caret-color: var(--color-text-primary);
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: color-mix(in srgb, var(--color-text-secondary) 72%, transparent);
+}
+
+input[type="checkbox"],
+input[type="radio"] {
+  accent-color: var(--color-accent);
+}
+
+option {
+  background-color: var(--color-bg);
+  color: var(--color-text-primary);
+}
+
+[data-theme="dark"] input,
+[data-theme="dark"] textarea,
+[data-theme="dark"] select,
+[data-theme="dark"] option {
+  color-scheme: dark;
+}
+
+[data-theme="dark"] select,
+[data-theme="dark"] option {
+  background-color: var(--color-bg);
+  color: var(--color-text-primary);
+}
+
+[data-theme="dark"] input[type="date"]::-webkit-calendar-picker-indicator {
+  filter: invert(1) opacity(0.8);
+}
+
+[data-theme="dark"] option:checked {
+  background-color: color-mix(in srgb, var(--color-accent) 34%, var(--color-bg));
+  color: var(--color-text-primary);
+}
+
 /* Themed scrollbars for scrollable panes. Keeps the gutter stable so content
    does not shift when a scrollbar appears after message content loads. */
 .scroll-region {
