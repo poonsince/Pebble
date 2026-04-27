@@ -214,4 +214,6 @@ Pebble is licensed under the [GNU Affero General Public License v3.0](LICENSE).
 
 <p align="center">
   Built by <a href="https://github.com/QingJ01">QingJ</a>.
+  <br>
+  Friend link: <a href="https://linux.do">LINUX DO</a>
 </p>

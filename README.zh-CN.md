@@ -214,4 +214,6 @@ Pebble 使用 [GNU Affero General Public License v3.0](LICENSE) 许可证。
 
 <p align="center">
   由 <a href="https://github.com/QingJ01">QingJ</a> 构建。
+  <br>
+  友情链接：<a href="https://linux.do">LINUX DO</a>
 </p>
