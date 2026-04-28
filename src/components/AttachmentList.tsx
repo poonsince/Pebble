@@ -26,6 +26,15 @@ function formatFileSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+function getErrorMessage(err: unknown): string | null {
+  if (typeof err === "string") return err;
+  if (!err || typeof err !== "object") return null;
+  const record = err as Record<string, unknown>;
+  if (typeof record.message === "string") return record.message;
+  if (typeof record.error === "string") return record.error;
+  return null;
+}
+
 export default function AttachmentList({ messageId }: Props) {
   const { t } = useTranslation();
   const [attachments, setAttachments] = useState<Attachment[]>([]);
@@ -76,12 +85,18 @@ export default function AttachmentList({ messageId }: Props) {
       const dir = await downloadDir();
       const safeName = sanitizeFilename(attachment.filename);
       const savePath = `${dir}/${safeName}`;
-      await downloadAttachment(attachment.id, savePath);
-      setDownloadedPaths((prev) => ({ ...prev, [attachment.id]: savePath }));
+      const downloadedPath = await downloadAttachment(attachment.id, savePath);
+      setDownloadedPaths((prev) => ({ ...prev, [attachment.id]: downloadedPath }));
       setDownloadProgress((prev) => { const next = { ...prev }; delete next[attachment.id]; return next; });
     } catch (err) {
       console.error("Failed to download attachment:", err);
-      useToastStore.getState().addToast({ message: t("attachments.downloadFailed", "Failed to download attachment"), type: "error" });
+      const reason = getErrorMessage(err);
+      useToastStore.getState().addToast({
+        message: reason
+          ? t("attachments.downloadFailedWithReason", "Failed to download attachment: {{reason}}", { reason })
+          : t("attachments.downloadFailed", "Failed to download attachment"),
+        type: "error",
+      });
     } finally {
       setDownloadingId(null);
     }

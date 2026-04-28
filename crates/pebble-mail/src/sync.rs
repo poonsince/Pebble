@@ -836,13 +836,6 @@ impl SyncWorker {
                         thread_mappings.insert(mid.clone(), tid.clone());
                     }
 
-                    // Notify listeners (e.g. search indexer) about the new message
-                    self.base.emit_message(StoredMessage {
-                        message: msg.clone(),
-                        folder_ids: vec![folder.id.clone()],
-                        notify: notify_new,
-                    });
-
                     persist_message_attachments_async(
                         Arc::clone(&self.base.store),
                         self.base.attachments_dir.clone(),
@@ -850,6 +843,13 @@ impl SyncWorker {
                         parsed.attachments,
                     )
                     .await;
+
+                    // Notify listeners (e.g. search indexer) about the new message
+                    self.base.emit_message(StoredMessage {
+                        message: msg.clone(),
+                        folder_ids: vec![folder.id.clone()],
+                        notify: notify_new,
+                    });
                 }
                 Err(e) => {
                     let reason = e.to_string();

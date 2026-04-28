@@ -286,7 +286,8 @@
     "download": "Download",
     "downloading": "Downloading...",
     "noAttachments": "No attachments",
-    "downloadFailed": "Failed to download attachment"
+    "downloadFailed": "Failed to download attachment",
+    "downloadFailedWithReason": "Failed to download attachment: {{reason}}"
   },
   "search": {
     "title": "Search",

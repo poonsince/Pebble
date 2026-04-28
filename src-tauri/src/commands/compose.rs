@@ -1,11 +1,12 @@
 use std::path::PathBuf;
 
+use crate::commands::attachments::stage_local_attachment_records;
 use crate::commands::oauth::ensure_account_oauth_tokens;
 use crate::{events, state::AppState};
 use pebble_core::traits::{MailTransport, OutgoingMessage};
 use pebble_core::{
-    new_id, now_timestamp, Account, Attachment, EmailAddress, Folder, FolderRole, FolderType,
-    Message, PebbleError, ProviderType,
+    new_id, now_timestamp, Account, EmailAddress, Folder, FolderRole, FolderType, Message,
+    PebbleError, ProviderType,
 };
 use pebble_crypto::CryptoService;
 use pebble_mail::{smtp::SmtpSender, SmtpConfig};
@@ -116,37 +117,12 @@ pub(crate) fn ensure_local_outgoing_folder(
     Ok(Folder { id, ..folder })
 }
 
-fn outgoing_attachment_records(message_id: &str, attachment_paths: &[String]) -> Vec<Attachment> {
-    attachment_paths
-        .iter()
-        .map(|path| {
-            let filename = std::path::Path::new(path)
-                .file_name()
-                .and_then(|name| name.to_str())
-                .unwrap_or("attachment")
-                .to_string();
-            let size = std::fs::metadata(path)
-                .map(|meta| meta.len().min(i64::MAX as u64) as i64)
-                .unwrap_or(0);
-            Attachment {
-                id: new_id(),
-                message_id: message_id.to_string(),
-                filename,
-                mime_type: "application/octet-stream".to_string(),
-                size,
-                local_path: Some(path.clone()),
-                content_id: None,
-                is_inline: false,
-            }
-        })
-        .collect()
-}
-
 pub(crate) fn save_outgoing_message_locally(
     store: &Store,
     account: &Account,
     outgoing: &OutgoingMessage,
     state: LocalOutgoingState,
+    attachments_dir: &std::path::Path,
 ) -> std::result::Result<Message, PebbleError> {
     let folder = ensure_local_outgoing_folder(store, &account.id, state)?;
     let now = now_timestamp();
@@ -155,7 +131,8 @@ pub(crate) fn save_outgoing_message_locally(
         LocalOutgoingState::Sent => "local-sent",
         LocalOutgoingState::Queued => "local-outbox",
     };
-    let attachments = outgoing_attachment_records(&id, &outgoing.attachment_paths);
+    let attachments =
+        stage_local_attachment_records(attachments_dir, &id, &outgoing.attachment_paths)?;
     let message = Message {
         id: id.clone(),
         account_id: account.id.clone(),
@@ -287,8 +264,13 @@ fn queue_failed_send(
     outgoing: &OutgoingMessage,
     error: &PebbleError,
 ) -> std::result::Result<String, PebbleError> {
-    let message =
-        save_outgoing_message_locally(&state.store, account, outgoing, LocalOutgoingState::Queued)?;
+    let message = save_outgoing_message_locally(
+        &state.store,
+        account,
+        outgoing,
+        LocalOutgoingState::Queued,
+        &state.attachments_dir,
+    )?;
     state.store.insert_pending_mail_op(
         &account.id,
         &message.id,
@@ -381,6 +363,7 @@ pub async fn send_email(
                 &account,
                 &outgoing,
                 LocalOutgoingState::Sent,
+                &state.attachments_dir,
             )?;
             Ok(())
         }
@@ -426,17 +409,23 @@ mod tests {
         }
     }
 
+    fn temp_attachments_dir(prefix: &str) -> std::path::PathBuf {
+        std::env::temp_dir().join(format!("{prefix}-{}", new_id()))
+    }
+
     #[test]
     fn sent_message_is_saved_to_local_sent_folder_after_send_success() {
         let store = Store::open_in_memory().unwrap();
         let account = test_account();
         store.insert_account(&account).unwrap();
+        let attachments_dir = temp_attachments_dir("pebble-sent-attachments");
 
         let saved = save_outgoing_message_locally(
             &store,
             &account,
             &outgoing_message(),
             LocalOutgoingState::Sent,
+            &attachments_dir,
         )
         .unwrap();
 
@@ -453,6 +442,8 @@ mod tests {
         assert!(reloaded.remote_id.starts_with("local-sent-"));
         assert!(reloaded.is_read);
         assert!(!reloaded.is_draft);
+
+        let _ = std::fs::remove_dir_all(attachments_dir);
     }
 
     #[test]
@@ -460,12 +451,14 @@ mod tests {
         let store = Store::open_in_memory().unwrap();
         let account = test_account();
         store.insert_account(&account).unwrap();
+        let attachments_dir = temp_attachments_dir("pebble-outbox-attachments");
 
         let saved = save_outgoing_message_locally(
             &store,
             &account,
             &outgoing_message(),
             LocalOutgoingState::Queued,
+            &attachments_dir,
         )
         .unwrap();
 
@@ -479,5 +472,44 @@ mod tests {
         assert!(outbox.role.is_none());
         assert_eq!(folder_ids, vec![outbox.id]);
         assert!(saved.remote_id.starts_with("local-outbox-"));
+
+        let _ = std::fs::remove_dir_all(attachments_dir);
+    }
+
+    #[test]
+    fn locally_saved_outgoing_message_uses_staged_attachment_copy() {
+        let store = Store::open_in_memory().unwrap();
+        let account = test_account();
+        store.insert_account(&account).unwrap();
+        let base = temp_attachments_dir("pebble-outgoing-stage");
+        let source_dir = base.join("source");
+        let attachments_dir = base.join("attachments");
+        std::fs::create_dir_all(&source_dir).unwrap();
+        let source = source_dir.join("report.txt");
+        std::fs::write(&source, b"payload").unwrap();
+
+        let mut outgoing = outgoing_message();
+        outgoing.attachment_paths = vec![source.to_string_lossy().to_string()];
+
+        let saved = save_outgoing_message_locally(
+            &store,
+            &account,
+            &outgoing,
+            LocalOutgoingState::Queued,
+            &attachments_dir,
+        )
+        .unwrap();
+        let attachments = store.list_attachments_by_message(&saved.id).unwrap();
+
+        assert_eq!(attachments.len(), 1);
+        let staged_path = attachments[0].local_path.as_ref().unwrap();
+        assert_ne!(staged_path.as_str(), source.to_string_lossy().as_ref());
+        assert!(std::path::Path::new(staged_path).starts_with(&attachments_dir));
+        assert_eq!(std::fs::read(staged_path).unwrap(), b"payload");
+
+        std::fs::remove_file(&source).unwrap();
+        assert_eq!(std::fs::read(staged_path).unwrap(), b"payload");
+
+        let _ = std::fs::remove_dir_all(base);
     }
 }

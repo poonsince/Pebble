@@ -1171,11 +1171,16 @@ fn is_attachment_part(payload: &GmailPayload) -> bool {
         return true;
     }
 
+    payload_content_disposition(payload)
+        .is_some_and(|value| value.to_ascii_lowercase().contains("attachment"))
+        || payload_content_id(payload).is_some()
+}
+
+fn payload_content_disposition(payload: &GmailPayload) -> Option<&str> {
     payload
-        .body
+        .headers
         .as_ref()
-        .and_then(|body| body.attachment_id.as_ref())
-        .is_some()
+        .and_then(|headers| GmailProvider::get_header(headers, "Content-Disposition"))
 }
 
 fn payload_content_id(payload: &GmailPayload) -> Option<String> {
@@ -1187,12 +1192,10 @@ fn payload_content_id(payload: &GmailPayload) -> Option<String> {
 }
 
 fn payload_is_inline(payload: &GmailPayload) -> bool {
-    payload
-        .headers
-        .as_ref()
-        .and_then(|headers| GmailProvider::get_header(headers, "Content-Disposition"))
-        .map(|value| value.to_ascii_lowercase().contains("inline"))
-        .unwrap_or(false)
+    payload_content_id(payload).is_some()
+        || payload_content_disposition(payload)
+            .map(|value| value.to_ascii_lowercase().contains("inline"))
+            .unwrap_or(false)
 }
 
 fn collect_attachment_descriptors(payload: &GmailPayload) -> Vec<GmailAttachmentDescriptor> {
@@ -1641,6 +1644,56 @@ mod tests {
         assert_eq!(attachments[0].meta.mime_type, "application/pdf");
         assert_eq!(attachments[0].meta.size, 3);
         assert_eq!(attachments[0].data, b"pdf");
+    }
+
+    #[test]
+    fn gmail_body_part_attachment_id_without_attachment_markers_is_not_attachment() {
+        let payload = GmailPayload {
+            headers: None,
+            mime_type: Some("multipart/alternative".to_string()),
+            body: None,
+            parts: Some(vec![GmailPayload {
+                headers: Some(vec![GmailHeader {
+                    name: "Content-Type".to_string(),
+                    value: "text/html; charset=utf-8".to_string(),
+                }]),
+                mime_type: Some("text/html".to_string()),
+                body: Some(GmailBody {
+                    size: Some(1024),
+                    data: None,
+                    attachment_id: Some("large-body-part".to_string()),
+                }),
+                parts: None,
+                filename: None,
+            }]),
+            filename: None,
+        };
+
+        assert!(collect_attachment_descriptors(&payload).is_empty());
+        assert!(!has_attachment_parts(&payload));
+    }
+
+    #[test]
+    fn gmail_content_id_part_is_marked_inline_even_without_disposition() {
+        let payload = GmailPayload {
+            headers: Some(vec![GmailHeader {
+                name: "Content-ID".to_string(),
+                value: "<image001@example>".to_string(),
+            }]),
+            mime_type: Some("image/png".to_string()),
+            body: Some(GmailBody {
+                size: Some(3),
+                data: Some(base64url_encode(b"png")),
+                attachment_id: None,
+            }),
+            parts: None,
+            filename: Some("image001.png".to_string()),
+        };
+
+        let descriptors = collect_attachment_descriptors(&payload);
+
+        assert_eq!(descriptors.len(), 1);
+        assert!(descriptors[0].is_inline);
     }
 
     #[test]

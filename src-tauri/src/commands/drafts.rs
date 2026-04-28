@@ -1,12 +1,11 @@
 use crate::state::AppState;
 use pebble_core::{
-    traits::DraftProvider, Attachment, DraftMessage, EmailAddress, FolderRole, PebbleError,
-    ProviderType,
+    traits::DraftProvider, DraftMessage, EmailAddress, FolderRole, PebbleError, ProviderType,
 };
-use std::path::Path;
 use tauri::State;
 use tracing::warn;
 
+use super::attachments::stage_local_attachment_records;
 use super::compose::validate_attachment_paths;
 use super::messages::provider_dispatch::ConnectedProvider;
 
@@ -144,7 +143,8 @@ fn save_draft_locally(
     draft: &DraftMessage,
 ) -> std::result::Result<String, PebbleError> {
     let id = draft.id.clone().unwrap_or_else(pebble_core::new_id);
-    let attachment_records = draft_attachment_records(&id, &draft.attachment_paths);
+    let attachment_records =
+        stage_local_attachment_records(&state.attachments_dir, &id, &draft.attachment_paths)?;
 
     let msg = pebble_core::Message {
         id: id.clone(),
@@ -189,32 +189,6 @@ fn save_draft_locally(
         .store
         .replace_message_with_attachments(&msg, &folder_ids, &attachment_records)?;
     Ok(id)
-}
-
-fn draft_attachment_records(draft_id: &str, attachment_paths: &[String]) -> Vec<Attachment> {
-    attachment_paths
-        .iter()
-        .map(|path| {
-            let filename = Path::new(path)
-                .file_name()
-                .and_then(|name| name.to_str())
-                .unwrap_or("attachment")
-                .to_string();
-            let size = std::fs::metadata(path)
-                .map(|metadata| metadata.len() as i64)
-                .unwrap_or(0);
-            Attachment {
-                id: pebble_core::new_id(),
-                message_id: draft_id.to_string(),
-                filename,
-                mime_type: "application/octet-stream".to_string(),
-                size,
-                local_path: Some(path.clone()),
-                content_id: None,
-                is_inline: false,
-            }
-        })
-        .collect()
 }
 
 #[tauri::command]

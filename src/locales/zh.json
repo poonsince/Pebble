@@ -286,7 +286,8 @@
     "download": "下载",
     "downloading": "下载中...",
     "noAttachments": "无附件",
-    "downloadFailed": "下载附件失败"
+    "downloadFailed": "下载附件失败",
+    "downloadFailedWithReason": "下载附件失败：{{reason}}"
   },
   "search": {
     "title": "搜索",

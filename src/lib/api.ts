@@ -303,8 +303,8 @@ export async function getAttachmentPath(attachmentId: string): Promise<string | 
   return invoke<string | null>("get_attachment_path", { attachmentId });
 }
 
-export async function downloadAttachment(attachmentId: string, saveTo: string): Promise<void> {
-  return invoke<void>("download_attachment", { attachmentId, saveTo });
+export async function downloadAttachment(attachmentId: string, saveTo: string): Promise<string> {
+  return invoke<string>("download_attachment", { attachmentId, saveTo });
 }
 
 // ─── Kanban API ──────────────────────────────────────────────────────────────
