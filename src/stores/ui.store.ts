@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { safeGetItem, safeSetItem } from "@/lib/browserStorage";
 import i18n from "@/lib/i18n";
 import { getInitialLanguage, LANGUAGE_STORAGE_KEY, type Language } from "@/lib/language";
 import { useComposeStore } from "./compose.store";
@@ -27,19 +28,19 @@ const NOTIFICATIONS_KEY = "pebble-notifications-enabled";
 const KEEP_RUNNING_BACKGROUND_KEY = "pebble-keep-running-background";
 
 function readRealtimePreference(): RealtimePreference {
-  const stored = localStorage.getItem(REALTIME_PREFERENCE_KEY);
+  const stored = safeGetItem(localStorage, REALTIME_PREFERENCE_KEY);
   return REALTIME_PREFERENCES.has(stored as RealtimePreference)
     ? (stored as RealtimePreference)
     : "realtime";
 }
 
 export function readNotificationsEnabledPreference(): boolean {
-  const stored = localStorage.getItem(NOTIFICATIONS_KEY);
+  const stored = safeGetItem(localStorage, NOTIFICATIONS_KEY);
   return stored === null ? true : stored === "true";
 }
 
 export function readKeepRunningInBackgroundPreference(): boolean {
-  const stored = localStorage.getItem(KEEP_RUNNING_BACKGROUND_KEY);
+  const stored = safeGetItem(localStorage, KEEP_RUNNING_BACKGROUND_KEY);
   return stored === null ? true : stored === "true";
 }
 
@@ -114,7 +115,7 @@ interface UIState {
 export const useUIStore = create<UIState>((set) => ({
   sidebarCollapsed: false,
   activeView: "inbox",
-  theme: (localStorage.getItem("pebble-theme") as Theme) || "light",
+  theme: (safeGetItem(localStorage, "pebble-theme") as Theme) || "light",
   language: initialLanguage,
   syncStatus: "idle",
   networkStatus: "online",
@@ -123,12 +124,12 @@ export const useUIStore = create<UIState>((set) => ({
   realtimeMode: initialRealtimeMode,
   notificationsEnabled: initialNotificationsEnabled,
   setNotificationsEnabled: (enabled) => {
-    localStorage.setItem(NOTIFICATIONS_KEY, String(enabled));
+    safeSetItem(localStorage, NOTIFICATIONS_KEY, String(enabled));
     set({ notificationsEnabled: enabled });
   },
   keepRunningInBackground: initialKeepRunningInBackground,
   setKeepRunningInBackground: (enabled) => {
-    localStorage.setItem(KEEP_RUNNING_BACKGROUND_KEY, String(enabled));
+    safeSetItem(localStorage, KEEP_RUNNING_BACKGROUND_KEY, String(enabled));
     set({ keepRunningInBackground: enabled });
   },
   previousView: "inbox",
@@ -170,13 +171,13 @@ export const useUIStore = create<UIState>((set) => ({
     set({ activeView: "inbox" });
   },
   setTheme: (theme) => {
-    localStorage.setItem("pebble-theme", theme);
+    safeSetItem(localStorage, "pebble-theme", theme);
     applyThemeToDom(theme);
     set({ theme });
   },
   setLanguage: (lang) => {
     i18n.changeLanguage(lang);
-    localStorage.setItem(LANGUAGE_STORAGE_KEY, lang);
+    safeSetItem(localStorage, LANGUAGE_STORAGE_KEY, lang);
     set({ language: lang });
   },
   setSyncStatus: (status) => set({ syncStatus: status }),
@@ -191,8 +192,8 @@ export const useUIStore = create<UIState>((set) => ({
     })),
   setRealtimeMode: (mode) => {
     const pollInterval = realtimePreferenceToPollInterval(mode);
-    localStorage.setItem(REALTIME_PREFERENCE_KEY, mode);
-    localStorage.setItem("pebble-poll-interval", String(pollInterval));
+    safeSetItem(localStorage, REALTIME_PREFERENCE_KEY, mode);
+    safeSetItem(localStorage, "pebble-poll-interval", String(pollInterval));
     set({
       realtimeMode: mode,
       pollInterval,
@@ -200,21 +201,21 @@ export const useUIStore = create<UIState>((set) => ({
   },
   pollInterval: realtimePreferenceToPollInterval(initialRealtimeMode),
   setPollInterval: (secs) => {
-    localStorage.setItem("pebble-poll-interval", String(secs));
+    safeSetItem(localStorage, "pebble-poll-interval", String(secs));
     set({ pollInterval: secs });
   },
   searchQuery: "",
   setSearchQuery: (q) => set({ searchQuery: q }),
-  settingsTab: (sessionStorage.getItem("pebble-settings-tab") as SettingsTab) || "accounts",
+  settingsTab: (safeGetItem(sessionStorage, "pebble-settings-tab") as SettingsTab) || "accounts",
   setSettingsTab: (tab) => {
-    sessionStorage.setItem("pebble-settings-tab", tab);
+    safeSetItem(sessionStorage, "pebble-settings-tab", tab);
     set({ settingsTab: tab });
   },
   pendingRuleDraftText: null,
   setPendingRuleDraftText: (text) => set({ pendingRuleDraftText: text }),
-  showFolderUnreadCount: localStorage.getItem("pebble-show-unread-count") === "true",
+  showFolderUnreadCount: safeGetItem(localStorage, "pebble-show-unread-count") === "true",
   setShowFolderUnreadCount: (show) => {
-    localStorage.setItem("pebble-show-unread-count", String(show));
+    safeSetItem(localStorage, "pebble-show-unread-count", String(show));
     set({ showFolderUnreadCount: show });
   },
 }));

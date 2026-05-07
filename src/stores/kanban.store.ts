@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { safeGetItem, safeRemoveItem } from "@/lib/browserStorage";
 import type { KanbanCard, KanbanColumnType } from "@/lib/api";
 import {
   listKanbanCards,
@@ -27,7 +28,7 @@ const LEGACY_CONTEXT_NOTES_STORAGE_KEY = "pebble-kanban-context-notes";
 function loadLegacyContextNotes(): Record<string, string> {
   if (typeof localStorage === "undefined") return {};
   try {
-    const parsed = JSON.parse(localStorage.getItem(LEGACY_CONTEXT_NOTES_STORAGE_KEY) || "{}");
+    const parsed = JSON.parse(safeGetItem(localStorage, LEGACY_CONTEXT_NOTES_STORAGE_KEY) || "{}");
     return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
   } catch {
     return {};
@@ -36,7 +37,7 @@ function loadLegacyContextNotes(): Record<string, string> {
 
 let legacyContextNotes = loadLegacyContextNotes();
 if (typeof localStorage !== "undefined") {
-  localStorage.removeItem(LEGACY_CONTEXT_NOTES_STORAGE_KEY);
+  safeRemoveItem(localStorage, LEGACY_CONTEXT_NOTES_STORAGE_KEY);
 }
 
 async function loadContextNotes(): Promise<Record<string, string>> {

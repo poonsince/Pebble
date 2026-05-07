@@ -1,11 +1,10 @@
 import { invoke } from "@tauri-apps/api/core";
+import { safeRemoveItem } from "@/lib/browserStorage";
 
 const LEGACY_STORAGE_KEY = "pebble-signatures";
 
 function clearLegacySignatures() {
-  try {
-    localStorage.removeItem(LEGACY_STORAGE_KEY);
-  } catch { /* ignored */ }
+  safeRemoveItem(localStorage, LEGACY_STORAGE_KEY);
 }
 
 export async function getSignature(accountId: string): Promise<string> {

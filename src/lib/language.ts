@@ -1,3 +1,5 @@
+import { safeGetItem } from "@/lib/browserStorage";
+
 export type Language = "en" | "zh";
 
 export const LANGUAGE_STORAGE_KEY = "pebble-language";
@@ -18,5 +20,5 @@ export function getInitialLanguage(
   storage: LanguageStorage = localStorage,
   source: NavigatorLanguageSource = navigator,
 ): Language {
-  return normalizeSavedLanguage(storage.getItem(LANGUAGE_STORAGE_KEY)) ?? detectSystemLanguage(source);
+  return normalizeSavedLanguage(safeGetItem(storage, LANGUAGE_STORAGE_KEY)) ?? detectSystemLanguage(source);
 }
