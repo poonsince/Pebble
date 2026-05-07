@@ -11,7 +11,7 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["nsis"],
+    "targets": ["deb"],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -30,7 +30,7 @@
   },
   "app": {
     "security": {
-      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self' https://api.github.com; font-src 'self' data:; frame-src 'none'; object-src 'none';"
+      "csp": "default-src 'self'; script-src 'self' 'unsafe-eval' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self' https://api.github.com; font-src 'self' data:; frame-src 'none'; object-src 'none';"
     },
     "windows": [
       {
@@ -44,7 +44,8 @@
         "resizable": true,
         "center": true,
         "visible": false,
-        "backgroundColor": "#1a1a1a"
+        "backgroundColor": "#1a1a1a",
+        "devtools": true
       }
     ]
   }
