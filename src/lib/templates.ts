@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { safeRemoveItem } from "@/lib/browserStorage";
 
 const LEGACY_STORAGE_KEY = "pebble-templates";
 
@@ -11,9 +12,7 @@ export interface EmailTemplate {
 }
 
 function clearLegacyTemplates() {
-  try {
-    localStorage.removeItem(LEGACY_STORAGE_KEY);
-  } catch { /* ignored */ }
+  safeRemoveItem(localStorage, LEGACY_STORAGE_KEY);
 }
 
 export async function listTemplates(): Promise<EmailTemplate[]> {

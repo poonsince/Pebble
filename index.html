@@ -108,6 +108,31 @@
       window.__splashStart=Date.now();
       // Apply saved theme immediately to avoid flash of wrong theme
       try{var t=localStorage.getItem('pebble-theme')||'light';var d=t==='system'?matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light':t;document.documentElement.setAttribute('data-theme',d)}catch(e){}
+      window.__showPebbleBootError=function(details){
+        try{
+          var splash=document.getElementById('splash');
+          if(!splash)return;
+          splash.innerHTML='' +
+            '<div style="max-width:560px;padding:24px;color:#e5e5e5;text-align:left;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,system-ui,sans-serif">' +
+            '<div style="font-size:18px;font-weight:600;margin-bottom:12px">Pebble failed to start</div>' +
+            '<div style="font-size:13px;line-height:1.5;opacity:.9;margin-bottom:12px">The frontend crashed before the app could render. Check the application log and JavaScript error below.</div>' +
+            '<pre style="white-space:pre-wrap;word-break:break-word;background:rgba(255,255,255,.06);padding:12px;border-radius:8px;font-size:12px;line-height:1.4;margin:0">' + String(details || 'Unknown startup error') + '</pre>' +
+            '</div>';
+        }catch(_){}
+      };
+      window.addEventListener('error', function(event){
+        var message = event && event.error && event.error.stack
+          ? event.error.stack
+          : (event && event.message) || 'Unknown startup error';
+        window.__showPebbleBootError(message);
+      });
+      window.addEventListener('unhandledrejection', function(event){
+        var reason = event && event.reason;
+        var message = reason && reason.stack
+          ? reason.stack
+          : String(reason || 'Unhandled promise rejection during startup');
+        window.__showPebbleBootError(message);
+      });
     </script>
     <div id="splash">
       <svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">

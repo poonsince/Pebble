@@ -1,3 +1,4 @@
+import { safeGetItem } from "@/lib/browserStorage";
 import type { PrivacyMode } from "@/lib/api";
 
 export const PRIVACY_MODE_KEY = "pebble-privacy-mode";
@@ -12,7 +13,7 @@ export function isStoredPrivacyMode(value: string | null): value is StoredPrivac
 export function readStoredPrivacyMode(
   storage: Pick<Storage, "getItem"> = localStorage,
 ): StoredPrivacyMode {
-  const saved = storage.getItem(PRIVACY_MODE_KEY);
+  const saved = safeGetItem(storage, PRIVACY_MODE_KEY);
   return isStoredPrivacyMode(saved) ? saved : DEFAULT_STORED_PRIVACY_MODE;
 }
 
