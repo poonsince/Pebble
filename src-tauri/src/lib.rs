@@ -228,8 +228,18 @@ fn take_pending_mailto_urls(state: tauri::State<PendingMailtoUrls>) -> Vec<Strin
     }
 }
 
+#[cfg(target_os = "linux")]
+fn configure_linux_webkit_env() {
+    if std::env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER").is_none() {
+        std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    #[cfg(target_os = "linux")]
+    configure_linux_webkit_env();
+
     let mut builder = tauri::Builder::default();
 
     #[cfg(desktop)]
@@ -434,6 +444,10 @@ pub fn run() {
                 "[startup] tauri setup complete: {}ms total",
                 startup_start.elapsed().as_millis()
             );
+
+            // Show main window on first launch (single-instance plugin only
+            // shows it on subsequent launches)
+            restore_main_window(&app.handle().clone());
 
             Ok(())
         })
