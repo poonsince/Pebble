@@ -1,4 +1,4 @@
-import { render, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import ThreadMessageBubble from "../../src/components/ThreadMessageBubble";
 import type { Message } from "../../src/lib/api";
@@ -59,6 +59,21 @@ describe("ThreadMessageBubble", () => {
 
     await waitFor(() => {
       expect(getRenderedHtml).toHaveBeenCalledWith("message-1", "LoadOnce");
+    });
+  });
+
+  it("passes backend-rendered html through to the email iframe renderer", async () => {
+    vi.mocked(getRenderedHtml).mockResolvedValue({
+      html: "<html><head><style>.card{max-width:600px}</style></head><body><div class='card'>Thread body</div></body></html>",
+      trackers_blocked: [],
+      images_blocked: 0,
+    });
+
+    render(<ThreadMessageBubble message={message} defaultExpanded={false} />);
+    fireEvent.click(screen.getByRole("button"));
+
+    await waitFor(() => {
+      expect(screen.getByText(/<style>\.card\{max-width:600px\}<\/style>/)).toBeTruthy();
     });
   });
 });

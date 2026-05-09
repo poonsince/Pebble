@@ -17,96 +17,67 @@ vi.mock("@/app/useMailtoOpen", () => ({
 
 describe("ShadowDomEmail", () => {
   beforeEach(() => {
+    document.documentElement.removeAttribute("data-theme");
     mocks.invoke.mockReset();
     mocks.openMailtoUrl.mockReset();
     mocks.invoke.mockResolvedValue(undefined);
     mocks.openMailtoUrl.mockResolvedValue(true);
   });
 
-  it("uses app theme variables instead of hardcoded light text styles", async () => {
+  it("renders sanitized email html into iframe srcdoc", () => {
+    const { container } = render(
+      <ShadowDomEmail html="<html><head><style>.card{max-width:600px}</style></head><body><div class='card'>Hello</div></body></html>" />,
+    );
+
+    const iframe = container.querySelector("iframe");
+    expect(iframe).not.toBeNull();
+    expect(iframe?.getAttribute("sandbox")).toBe("allow-same-origin");
+    expect(iframe?.getAttribute("srcdoc")).toContain(".card{max-width:600px}");
+    expect(iframe?.getAttribute("srcdoc")).toContain("Hello");
+  });
+
+  it("adds a light reading canvas fallback in dark theme", () => {
     document.documentElement.setAttribute("data-theme", "dark");
 
     const { container } = render(<ShadowDomEmail html="<p>Hello</p>" />);
-    const host = container.firstChild as HTMLDivElement | null;
 
-    await waitFor(() => {
-      expect(host?.shadowRoot).not.toBeNull();
-    });
-
-    const shadowMarkup = host!.shadowRoot!.innerHTML;
-    expect(shadowMarkup).toContain("var(--color-text-primary)");
-    expect(shadowMarkup).toContain("var(--color-accent)");
-    expect(shadowMarkup).not.toContain("color: #1a1a1a");
-  });
-
-  it("themes horizontal overflow inside email content", async () => {
-    const { container } = render(<ShadowDomEmail html="<pre>long code line</pre>" />);
-    const host = container.firstChild as HTMLDivElement | null;
-
-    await waitFor(() => {
-      expect(host?.shadowRoot).not.toBeNull();
-    });
-
-    const shadowMarkup = host!.shadowRoot!.innerHTML;
-    expect(shadowMarkup).toContain("scrollbar-width: thin");
-    expect(shadowMarkup).toContain("::-webkit-scrollbar-thumb");
-  });
-
-  it("keeps light-authored email html readable in dark theme", async () => {
-    document.documentElement.setAttribute("data-theme", "dark");
-
-    const { container } = render(
-      <ShadowDomEmail html={'<div style="color: #000000">Dark inline text</div>'} />,
-    );
-    const host = container.firstChild as HTMLDivElement | null;
-
-    await waitFor(() => {
-      expect(host?.shadowRoot).not.toBeNull();
-    });
-
-    const shadowMarkup = host!.shadowRoot!.innerHTML;
-    expect(shadowMarkup).toContain('class="pebble-email-content"');
-    expect(shadowMarkup).toContain(':host-context([data-theme="dark"]) .pebble-email-content');
-    expect(shadowMarkup).toContain("color-scheme: light");
-    expect(shadowMarkup).toContain("background: #fff");
-    expect(shadowMarkup).toContain("color: #202124");
-  });
-
-  it("prevents full-height email wrappers from painting a gray viewport canvas", async () => {
-    const html = `
-      <table height="100%" style="height: 100%; background: #f1f1f1">
-        <tbody><tr><td>Cloudflare content</td></tr></tbody>
-      </table>
-    `;
-
-    const { container } = render(<ShadowDomEmail html={html} />);
-    const host = container.firstChild as HTMLDivElement | null;
-
-    await waitFor(() => {
-      expect(host?.shadowRoot?.querySelector(".pebble-email-content")).not.toBeNull();
-    });
-
-    const shadowMarkup = host!.shadowRoot!.innerHTML;
-    expect(shadowMarkup).toContain('.pebble-email-content > table[height="100%"]');
-    expect(shadowMarkup).toContain('style="height: 100%; background: #f1f1f1"');
-    expect(shadowMarkup).toContain("height: auto !important");
-    expect(shadowMarkup).toContain("min-height: 0 !important");
+    const iframe = container.querySelector("iframe");
+    expect(iframe?.getAttribute("srcdoc")).toContain("background: #fff; color: #202124; color-scheme: light;");
   });
 
   it("opens http and https links through the external URL command", async () => {
     const { container } = render(
       <ShadowDomEmail html={'<a href="http://pebble.byebug.cn/">Pebble</a>'} />,
     );
-    const host = container.firstChild as HTMLDivElement | null;
 
-    await waitFor(() => {
-      expect(host?.shadowRoot?.querySelector("a")).not.toBeNull();
+    const iframe = container.querySelector("iframe") as HTMLIFrameElement;
+    const anchor = document.createElement("a");
+    anchor.setAttribute("href", "http://pebble.byebug.cn/");
+    const iframeDocument = {
+      addEventListener: vi.fn((event: string, handler: EventListener) => {
+        if (event === "click") {
+          handler({
+            target: anchor,
+            preventDefault: vi.fn(),
+          } as unknown as Event);
+        }
+      }),
+      removeEventListener: vi.fn(),
+      documentElement: { scrollHeight: 480 },
+      body: { scrollHeight: 420 },
+    } as unknown as Document;
+
+    Object.defineProperty(iframe, "contentDocument", {
+      configurable: true,
+      value: iframeDocument,
     });
 
-    fireEvent.click(host!.shadowRoot!.querySelector("a")!);
+    fireEvent.load(iframe);
 
-    expect(mocks.invoke).toHaveBeenCalledWith("open_external_url", {
-      url: "http://pebble.byebug.cn/",
+    await waitFor(() => {
+      expect(mocks.invoke).toHaveBeenCalledWith("open_external_url", {
+        url: "http://pebble.byebug.cn/",
+      });
     });
   });
 
@@ -114,15 +85,56 @@ describe("ShadowDomEmail", () => {
     const { container } = render(
       <ShadowDomEmail html={'<a href="mailto:qingj1314@163.com">qingj1314@163.com</a>'} />,
     );
-    const host = container.firstChild as HTMLDivElement | null;
 
-    await waitFor(() => {
-      expect(host?.shadowRoot?.querySelector("a")).not.toBeNull();
+    const iframe = container.querySelector("iframe") as HTMLIFrameElement;
+    const anchor = document.createElement("a");
+    anchor.setAttribute("href", "mailto:qingj1314@163.com");
+    const iframeDocument = {
+      addEventListener: vi.fn((event: string, handler: EventListener) => {
+        if (event === "click") {
+          handler({
+            target: anchor,
+            preventDefault: vi.fn(),
+          } as unknown as Event);
+        }
+      }),
+      removeEventListener: vi.fn(),
+      documentElement: { scrollHeight: 360 },
+      body: { scrollHeight: 320 },
+    } as unknown as Document;
+
+    Object.defineProperty(iframe, "contentDocument", {
+      configurable: true,
+      value: iframeDocument,
     });
 
-    fireEvent.click(host!.shadowRoot!.querySelector("a")!);
+    fireEvent.load(iframe);
 
-    expect(mocks.openMailtoUrl).toHaveBeenCalledWith("mailto:qingj1314@163.com");
+    await waitFor(() => {
+      expect(mocks.openMailtoUrl).toHaveBeenCalledWith("mailto:qingj1314@163.com");
+    });
     expect(mocks.invoke).not.toHaveBeenCalled();
+  });
+
+  it("sizes the iframe to the loaded document height", async () => {
+    const { container } = render(<ShadowDomEmail html="<p>Hello</p>" />);
+    const iframe = container.querySelector("iframe") as HTMLIFrameElement;
+    const iframeDocument = {
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      documentElement: { scrollHeight: 640 },
+      body: { scrollHeight: 512 },
+    } as unknown as Document;
+
+    Object.defineProperty(iframe, "contentDocument", {
+      configurable: true,
+      value: iframeDocument,
+    });
+
+    fireEvent.load(iframe);
+
+    await waitFor(() => {
+      expect(iframe.style.height).toBe("640px");
+    });
   });
 });

@@ -1,106 +1,50 @@
-import { useRef, useLayoutEffect } from "react";
+import { useLayoutEffect, useMemo, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { openMailtoUrl } from "@/app/useMailtoOpen";
-import { sanitizeHtml } from "@/lib/sanitizeHtml";
+import {
+  sanitizeHtmlDocumentForIframe,
+  wrapHtmlDocumentForIframe,
+} from "@/lib/sanitizeHtml";
 
 interface ShadowDomEmailProps {
   html: string;
   className?: string;
 }
 
+function isDarkThemeActive(): boolean {
+  return document.documentElement.getAttribute("data-theme") === "dark";
+}
+
 export function ShadowDomEmail({ html, className }: ShadowDomEmailProps) {
-  const hostRef = useRef<HTMLDivElement>(null);
+  const iframeRef = useRef<HTMLIFrameElement>(null);
+  const cleanupRef = useRef<(() => void) | null>(null);
 
-  // The shadow body must be ready before paint; otherwise the reader can flash
-  // from the fallback text into the sanitized HTML a frame later.
+  const srcDoc = useMemo(() => {
+    const safeHtml = sanitizeHtmlDocumentForIframe(html);
+    return wrapHtmlDocumentForIframe(safeHtml, isDarkThemeActive());
+  }, [html]);
+
   useLayoutEffect(() => {
-    if (!hostRef.current) return;
-    const shadow = hostRef.current.shadowRoot
-      || hostRef.current.attachShadow({ mode: "open" });
+    return () => {
+      cleanupRef.current?.();
+      cleanupRef.current = null;
+    };
+  }, []);
 
-    const safeHtml = sanitizeHtml(html);
-    shadow.innerHTML = `
-      <style>
-        :host {
-          all: initial;
-          display: block;
-          font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-          font-size: 14px;
-          color: var(--color-text-primary);
-          background: transparent;
-          word-break: break-word;
-        }
-        img { max-width: 100%; height: auto; }
-        a { color: var(--color-accent); }
-        .pebble-email-content {
-          box-sizing: border-box;
-          max-width: 100%;
-          overflow-x: auto;
-          color: inherit;
-          background: transparent;
-        }
-        :host-context([data-theme="dark"]) .pebble-email-content {
-          display: inline-block;
-          max-width: 100%;
-          color-scheme: light;
-          color: #202124;
-          background: #fff;
-        }
-        pre {
-          white-space: pre-wrap;
-          overflow-x: auto;
-          scrollbar-color: var(--color-scrollbar-thumb) transparent;
-          scrollbar-width: thin;
-        }
-        pre::-webkit-scrollbar {
-          width: 10px;
-          height: 10px;
-        }
-        pre::-webkit-scrollbar-thumb {
-          border: 3px solid transparent;
-          border-radius: 999px;
-          background-clip: content-box;
-          background-color: var(--color-scrollbar-thumb);
-        }
-        pre:hover::-webkit-scrollbar-thumb {
-          background-color: var(--color-scrollbar-thumb-hover);
-        }
-        table { border-collapse: collapse; }
-        .pebble-email-content > table[height="100%"],
-        .pebble-email-content > div[height="100%"],
-        .pebble-email-content > center[height="100%"],
-        .pebble-email-content > table[style*="height:100%" i],
-        .pebble-email-content > table[style*="height: 100%" i],
-        .pebble-email-content > table[style*="height:100vh" i],
-        .pebble-email-content > table[style*="height: 100vh" i],
-        .pebble-email-content > div[style*="height:100%" i],
-        .pebble-email-content > div[style*="height: 100%" i],
-        .pebble-email-content > div[style*="height:100vh" i],
-        .pebble-email-content > div[style*="height: 100vh" i],
-        .pebble-email-content > center[style*="height:100%" i],
-        .pebble-email-content > center[style*="height: 100%" i],
-        .pebble-email-content > center[style*="height:100vh" i],
-        .pebble-email-content > center[style*="height: 100vh" i] {
-          height: auto !important;
-          min-height: 0 !important;
-        }
-        td, th { word-break: normal; overflow-wrap: normal; }
-        body, div { word-wrap: break-word; overflow-wrap: break-word; }
-        .blocked-image {
-          display: inline-block;
-          padding: 6px 12px;
-          font-size: 12px;
-          color: #888;
-          background: #f5f5f5;
-          border: 1px dashed #ccc;
-          border-radius: 4px;
-          text-align: center;
-          max-width: 100%;
-          box-sizing: border-box;
-        }
-      </style>
-      <div class="pebble-email-content">${safeHtml}</div>
-    `;
+  const handleLoad = () => {
+    cleanupRef.current?.();
+
+    const iframe = iframeRef.current;
+    const doc = iframe?.contentDocument;
+    if (!iframe || !doc) return;
+
+    const applyHeight = () => {
+      const height = Math.max(
+        doc.documentElement?.scrollHeight ?? 0,
+        doc.body?.scrollHeight ?? 0,
+      );
+      iframe.style.height = `${height}px`;
+    };
 
     const handleClick = (event: Event) => {
       const target = event.target;
@@ -123,11 +67,42 @@ export function ShadowDomEmail({ html, className }: ShadowDomEmailProps) {
       }
     };
 
-    shadow.addEventListener("click", handleClick);
-    return () => {
-      shadow.removeEventListener("click", handleClick);
-    };
-  }, [html]);
+    applyHeight();
+    requestAnimationFrame(applyHeight);
+    window.setTimeout(applyHeight, 60);
+    window.setTimeout(applyHeight, 180);
 
-  return <div ref={hostRef} className={className} />;
+    doc.addEventListener("click", handleClick);
+
+    const observer = typeof ResizeObserver === "undefined"
+      ? null
+      : new ResizeObserver(() => applyHeight());
+
+    if (observer && doc.documentElement) {
+      observer.observe(doc.documentElement);
+    }
+
+    cleanupRef.current = () => {
+      doc.removeEventListener("click", handleClick);
+      observer?.disconnect();
+    };
+  };
+
+  return (
+    <iframe
+      ref={iframeRef}
+      className={className}
+      sandbox="allow-same-origin"
+      srcDoc={srcDoc}
+      onLoad={handleLoad}
+      title="Email content"
+      scrolling="no"
+      style={{
+        width: "100%",
+        border: "none",
+        display: "block",
+        background: "transparent",
+      }}
+    />
+  );
 }

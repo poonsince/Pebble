@@ -4,7 +4,6 @@ import { useTranslation } from "react-i18next";
 import { getRenderedHtml } from "@/lib/api";
 import type { Message, RenderedHtml } from "@/lib/api";
 import { defaultPrivacyMode } from "@/lib/privacyMode";
-import { sanitizeHtml } from "@/lib/sanitizeHtml";
 import { ShadowDomEmail } from "./ShadowDomEmail";
 
 interface Props {
@@ -27,7 +26,7 @@ export default function ThreadMessageBubble({ message, defaultExpanded = false }
   useEffect(() => {
     if (expanded && !rendered) {
       getRenderedHtml(message.id, defaultPrivacyMode())
-        .then((html) => setRendered({ ...html, html: sanitizeHtml(html.html) }))
+        .then((html) => setRendered(html))
         .catch((err) => console.warn("Failed to render thread message HTML", err));
     }
   }, [expanded, rendered, message.id]);

@@ -115,4 +115,17 @@ describe("useMessageLoader", () => {
     await waitFor(() => expect(result.current.error).toBe("render failed"));
     expect(result.current.message?.id).toBe("message-1");
   });
+
+  it("returns backend-rendered html without fragment re-sanitizing it", async () => {
+    vi.mocked(getMessageWithHtml).mockResolvedValue([
+      makeMessage(),
+      makeRendered("<html><head><style>.card{max-width:600px}</style></head><body><div class='card'>Hello</div></body></html>"),
+    ]);
+
+    const { result } = renderHook(() => useMessageLoader("message-1", "Strict"));
+
+    await waitFor(() => {
+      expect(result.current.rendered?.html).toContain("<style>.card{max-width:600px}</style>");
+    });
+  });
 });

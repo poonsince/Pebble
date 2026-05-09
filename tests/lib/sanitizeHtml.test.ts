@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { sanitizeHtml } from "../../src/lib/sanitizeHtml";
+import {
+  sanitizeHtml,
+  sanitizeHtmlDocumentForIframe,
+  wrapHtmlDocumentForIframe,
+} from "../../src/lib/sanitizeHtml";
 
 describe("sanitizeHtml", () => {
   it("preserves safe inline email styles", () => {
@@ -102,5 +106,43 @@ describe("sanitizeHtml", () => {
     expect(sanitized).toContain('rel="noopener noreferrer"');
     expect(sanitized).not.toContain("_top");
     expect(sanitized).not.toContain('rel="opener"');
+  });
+});
+
+describe("sanitizeHtmlDocumentForIframe", () => {
+  it("preserves safe head styles for full html email documents", () => {
+    const sanitized = sanitizeHtmlDocumentForIframe(
+      '<html><head><style>.card{max-width:600px;margin:0 auto;background:#fff}</style><title>Subject</title></head><body><div class="card">Visible body</div></body></html>',
+    );
+
+    expect(sanitized).toContain("<html");
+    expect(sanitized).toContain("<head>");
+    expect(sanitized).toContain(".card{max-width:600px;margin:0 auto;background:#fff}");
+    expect(sanitized).toContain("Visible body");
+    expect(sanitized).toContain("<title>Subject</title>");
+  });
+
+  it("removes scripts, event handlers, and unsafe css from iframe html", () => {
+    const sanitized = sanitizeHtmlDocumentForIframe(
+      '<html><head><style>body{background:url(https://evil.example/track)}</style><script>alert(1)</script></head><body><a href="javascript:alert(1)" onclick="alert(1)">Open</a><p>Body</p></body></html>',
+    );
+
+    expect(sanitized).toContain("Body");
+    expect(sanitized).not.toContain("<script");
+    expect(sanitized).not.toContain("onclick=");
+    expect(sanitized).not.toContain("javascript:");
+    expect(sanitized).not.toContain("evil.example");
+  });
+});
+
+describe("wrapHtmlDocumentForIframe", () => {
+  it("wraps body fragments in a full html document with support styles", () => {
+    const wrapped = wrapHtmlDocumentForIframe("<p>Hello</p>", false);
+
+    expect(wrapped).toContain("<!doctype html>");
+    expect(wrapped).toContain('<meta charset="utf-8">');
+    expect(wrapped).toContain('name="viewport"');
+    expect(wrapped).toContain("<p>Hello</p>");
+    expect(wrapped).toContain("img { max-width: 100% !important; height: auto !important; }");
   });
 });

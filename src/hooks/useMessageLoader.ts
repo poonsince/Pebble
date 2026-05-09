@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { getMessageWithHtml, getRenderedHtml } from "@/lib/api";
 import { useUpdateFlagsMutation } from "@/hooks/mutations/useUpdateFlagsMutation";
-import { sanitizeHtml } from "@/lib/sanitizeHtml";
 import type { Message, RenderedHtml, PrivacyMode } from "@/lib/api";
 
 export function useMessageLoader(messageId: string | null, privacyMode: PrivacyMode) {
@@ -46,7 +45,7 @@ export function useMessageLoader(messageId: string | null, privacyMode: PrivacyM
         const [msg, html] = result;
         setMessage(msg);
         renderedKeyRef.current = initialRenderKey;
-        setRendered({ ...html, html: sanitizeHtml(html.html) });
+        setRendered(html);
 
         if (!cancelled && !msg.is_read) {
           flagsMutation.mutate({ messageId: messageId!, isRead: true });
@@ -78,7 +77,7 @@ export function useMessageLoader(messageId: string | null, privacyMode: PrivacyM
       .then((html) => {
         if (!cancelled) {
           renderedKeyRef.current = currentRenderKey;
-          setRendered({ ...html, html: sanitizeHtml(html.html) });
+          setRendered(html);
         }
       })
       .catch((err) => {
