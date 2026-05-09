@@ -72,6 +72,14 @@ export async function healthCheck(): Promise<string> {
   return invoke<string>("health_check");
 }
 
+export async function openDevtools(): Promise<void> {
+  return invoke<void>("open_devtools");
+}
+
+export async function closeDevtools(): Promise<void> {
+  return invoke<void>("close_devtools");
+}
+
 export async function readAppLog(maxBytes: number): Promise<AppLogSnapshot> {
   return invoke<AppLogSnapshot>("read_app_log", { maxBytes });
 }

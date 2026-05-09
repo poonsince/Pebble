@@ -2,6 +2,8 @@ import { Component, type ErrorInfo, type ReactNode, useEffect } from "react";
 import i18next from "i18next";
 import Layout from "./app/Layout";
 import { logStartupTiming } from "@/lib/startupTiming";
+import { readDevtoolsAutoOpenPreference } from "@/stores/ui.store";
+import { openDevtools } from "@/lib/api";
 
 class ErrorBoundary extends Component<
   { children: ReactNode },
@@ -50,6 +52,9 @@ class ErrorBoundary extends Component<
 
 export default function App() {
   useEffect(() => {
+    if (readDevtoolsAutoOpenPreference()) {
+      openDevtools().catch(() => {});
+    }
     logStartupTiming("react app mounted");
     const splash = document.getElementById("splash");
     if (!splash) return;

@@ -11,8 +11,9 @@ import ShortcutsTab from "./ShortcutsTab";
 import TranslateTab from "./TranslateTab";
 import PrivacyTab from "./PrivacyTab";
 import AboutTab from "./AboutTab";
+import DeveloperTab from "./DeveloperTab";
 
-const TAB_IDS = ["accounts", "general", "proxy", "appearance", "privacy", "rules", "remoteWrites", "translation", "shortcuts", "cloudSync", "about"] as const;
+const TAB_IDS = ["accounts", "general", "proxy", "appearance", "privacy", "rules", "remoteWrites", "translation", "shortcuts", "cloudSync", "about", "developer"] as const;
 
 const TAB_LABEL_KEYS: Record<string, string> = {
   accounts: "settings.accounts",
@@ -26,6 +27,7 @@ const TAB_LABEL_KEYS: Record<string, string> = {
   shortcuts: "settings.shortcuts",
   cloudSync: "settings.cloudSync",
   about: "settings.about",
+  developer: "settings.developer",
 };
 
 export default function SettingsView() {
@@ -117,6 +119,7 @@ export default function SettingsView() {
         {activeTab === "privacy" && <PrivacyTab />}
         {activeTab === "cloudSync" && <CloudSyncTab />}
         {activeTab === "about" && <AboutTab />}
+        {activeTab === "developer" && <DeveloperTab />}
       </div>
     </div>
   );

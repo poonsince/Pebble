@@ -6,7 +6,7 @@ import { useComposeStore } from "./compose.store";
 import { useMailStore } from "./mail.store";
 
 export type ActiveView = "inbox" | "kanban" | "settings" | "search" | "snoozed" | "starred" | "compose";
-export type SettingsTab = "accounts" | "general" | "proxy" | "appearance" | "privacy" | "rules" | "remoteWrites" | "translation" | "shortcuts" | "cloudSync" | "about";
+export type SettingsTab = "accounts" | "general" | "proxy" | "appearance" | "privacy" | "rules" | "remoteWrites" | "translation" | "shortcuts" | "cloudSync" | "about" | "developer";
 export type Theme = "light" | "dark" | "system";
 export type { Language } from "@/lib/language";
 export type NetworkStatus = "online" | "offline";
@@ -26,6 +26,7 @@ const REALTIME_PREFERENCE_KEY = "pebble-realtime-mode";
 const REALTIME_PREFERENCES = new Set<RealtimePreference>(["realtime", "balanced", "battery", "manual"]);
 const NOTIFICATIONS_KEY = "pebble-notifications-enabled";
 const KEEP_RUNNING_BACKGROUND_KEY = "pebble-keep-running-background";
+const DEVTOOLS_AUTO_OPEN_KEY = "pebble-devtools-auto-open";
 
 function readRealtimePreference(): RealtimePreference {
   const stored = safeGetItem(localStorage, REALTIME_PREFERENCE_KEY);
@@ -44,6 +45,10 @@ export function readKeepRunningInBackgroundPreference(): boolean {
   return stored === null ? true : stored === "true";
 }
 
+export function readDevtoolsAutoOpenPreference(): boolean {
+  return safeGetItem(localStorage, DEVTOOLS_AUTO_OPEN_KEY) === "true";
+}
+
 export function realtimePreferenceToPollInterval(mode: RealtimePreference): number {
   switch (mode) {
     case "realtime":
@@ -60,6 +65,7 @@ export function realtimePreferenceToPollInterval(mode: RealtimePreference): numb
 const initialRealtimeMode = readRealtimePreference();
 const initialNotificationsEnabled = readNotificationsEnabledPreference();
 const initialKeepRunningInBackground = readKeepRunningInBackgroundPreference();
+const initialDevtoolsAutoOpen = readDevtoolsAutoOpenPreference();
 const initialLanguage = getInitialLanguage();
 
 /** Resolve "system" theme to an actual "dark" | "light" value. */
@@ -89,6 +95,8 @@ interface UIState {
   setNotificationsEnabled: (enabled: boolean) => void;
   keepRunningInBackground: boolean;
   setKeepRunningInBackground: (enabled: boolean) => void;
+  devtoolsAutoOpen: boolean;
+  setDevtoolsAutoOpen: (enabled: boolean) => void;
   previousView: ActiveView;
   toggleSidebar: () => void;
   setActiveView: (view: ActiveView) => void;
@@ -131,6 +139,11 @@ export const useUIStore = create<UIState>((set) => ({
   setKeepRunningInBackground: (enabled) => {
     safeSetItem(localStorage, KEEP_RUNNING_BACKGROUND_KEY, String(enabled));
     set({ keepRunningInBackground: enabled });
+  },
+  devtoolsAutoOpen: initialDevtoolsAutoOpen,
+  setDevtoolsAutoOpen: (enabled) => {
+    safeSetItem(localStorage, DEVTOOLS_AUTO_OPEN_KEY, String(enabled));
+    set({ devtoolsAutoOpen: enabled });
   },
   previousView: "inbox",
   toggleSidebar: () =>

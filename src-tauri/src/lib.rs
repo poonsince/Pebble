@@ -228,6 +228,20 @@ fn take_pending_mailto_urls(state: tauri::State<PendingMailtoUrls>) -> Vec<Strin
     }
 }
 
+#[tauri::command]
+fn open_devtools(app: AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        window.open_devtools();
+    }
+}
+
+#[tauri::command]
+fn close_devtools(app: AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        window.close_devtools();
+    }
+}
+
 #[cfg(target_os = "linux")]
 fn configure_linux_webkit_env() {
     if std::env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER").is_none() {
@@ -454,6 +468,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             set_tray_menu_labels,
             take_pending_mailto_urls,
+            open_devtools,
+            close_devtools,
             commands::health::health_check,
             commands::health::check_for_update,
             commands::health::open_external_url,

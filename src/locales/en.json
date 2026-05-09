@@ -196,6 +196,7 @@
     "saveAccountProxy": "Save account proxy",
     "cloudSync": "Settings Backup",
     "about": "About",
+    "developer": "Developer",
     "privacy": "Privacy",
     "confirmDeleteAccount": "Remove account {{email}}? This cannot be undone.",
     "removeAccount": "Remove account",

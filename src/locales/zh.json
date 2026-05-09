@@ -192,6 +192,7 @@
     "saveAccountProxy": "保存账号代理",
     "cloudSync": "设置备份",
     "about": "关于",
+    "developer": "开发",
     "privacy": "隐私",
     "confirmDeleteAccount": "确定移除账户 {{email}}？此操作不可撤销。",
     "removeAccount": "移除账户",
