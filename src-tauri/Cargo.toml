@@ -27,6 +27,7 @@ pebble-crypto = { path = "../crates/pebble-crypto" }
 pebble-oauth = { path = "../crates/pebble-oauth" }
 tauri-plugin-notification = "2"
 tauri-plugin-deep-link = "2"
+base64 = "0.22"
 lettre = { workspace = true }
 reqwest = { workspace = true }
 semver = { workspace = true }

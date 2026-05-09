@@ -339,7 +339,7 @@ fn build_sanitizer(_mode: &PrivacyMode) -> Builder<'static> {
             ),
             (
                 "img",
-                ["src", "alt", "width", "height", "class"]
+                ["src", "alt", "width", "height", "class", "data-cid"]
                     .iter()
                     .copied()
                     .collect::<HashSet<_>>(),
@@ -451,6 +451,18 @@ fn preprocess_images(
                 let src = el.get_attribute("src");
                 let width = el.get_attribute("width");
                 let height = el.get_attribute("height");
+
+                // Handle cid: (inline embedded) images: convert src="cid:xxx"
+                // to data-cid="xxx" so the frontend can replace with data URIs.
+                // ammonia strips cid: URLs since they aren't in allowed schemes.
+                if let Some(ref src_val) = src {
+                    if let Some(cid) = src_val.strip_prefix("cid:") {
+                        let cid_clean = cid.trim_matches(|c| c == '<' || c == '>');
+                        el.set_attribute("data-cid", cid_clean).unwrap();
+                        el.remove_attribute("src");
+                        return Ok(());
+                    }
+                }
 
                 let action = process_img_tag(
                     src.as_deref(),

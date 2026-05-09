@@ -1,7 +1,9 @@
 use crate::state::AppState;
+use base64::Engine;
 use pebble_core::{Message, PebbleError, PrivacyMode, RenderedHtml, TrustType};
 use pebble_privacy::PrivacyGuard;
 use pebble_store::Store;
+use std::collections::HashMap;
 use tauri::State;
 
 #[tauri::command]
@@ -11,6 +13,7 @@ pub async fn get_rendered_html(
     privacy_mode: PrivacyMode,
 ) -> std::result::Result<RenderedHtml, PebbleError> {
     let store = state.store.clone();
+    let attachments_dir = state.attachments_dir.clone();
     tokio::task::spawn_blocking(move || {
         let message = store
             .get_message(&message_id)?
@@ -18,7 +21,12 @@ pub async fn get_rendered_html(
 
         let effective_mode = resolve_privacy_mode(&store, &message, privacy_mode)?;
         let guard = PrivacyGuard::new();
-        Ok(guard.render_message_html(&message.body_html_raw, &message.body_text, &effective_mode))
+        let mut rendered =
+            guard.render_message_html(&message.body_html_raw, &message.body_text, &effective_mode);
+
+        rendered.html = load_inline_images(&store, &message_id, &attachments_dir, &rendered.html);
+
+        Ok(rendered)
     })
     .await
     .map_err(|e| PebbleError::Internal(format!("Task join error: {e}")))?
@@ -31,6 +39,7 @@ pub async fn get_message_with_html(
     privacy_mode: PrivacyMode,
 ) -> std::result::Result<Option<(Message, RenderedHtml)>, PebbleError> {
     let store = state.store.clone();
+    let attachments_dir = state.attachments_dir.clone();
     tokio::task::spawn_blocking(move || {
         let message = match store.get_message(&message_id)? {
             Some(m) => m,
@@ -39,8 +48,12 @@ pub async fn get_message_with_html(
 
         let effective_mode = resolve_privacy_mode(&store, &message, privacy_mode)?;
         let guard = PrivacyGuard::new();
-        let rendered =
+        let mut rendered =
             guard.render_message_html(&message.body_html_raw, &message.body_text, &effective_mode);
+
+        rendered.html =
+            load_inline_images(&store, &message_id, &attachments_dir, &rendered.html);
+
         Ok(Some((message, rendered)))
     })
     .await
@@ -57,6 +70,67 @@ pub async fn is_trusted_sender(
     tokio::task::spawn_blocking(move || Ok(store.is_trusted_sender(&account_id, &email)?.is_some()))
         .await
         .map_err(|e| PebbleError::Internal(format!("Task join error: {e}")))?
+}
+
+/// Replace `data-cid` attributes in HTML with data URIs from inline attachments.
+fn load_inline_images(
+    store: &Store,
+    message_id: &str,
+    attachments_dir: &std::path::Path,
+    html: &str,
+) -> String {
+    let attachments = match store.list_attachments_by_message(message_id) {
+        Ok(atts) => atts,
+        Err(_) => return html.to_string(),
+    };
+
+    let mut cid_map: HashMap<String, String> = HashMap::new();
+    for att in &attachments {
+        if !att.is_inline {
+            continue;
+        }
+        if let Some(ref cid) = att.content_id {
+            if let Some(ref local_path) = att.local_path {
+                let clean_cid = cid.trim_matches(|c: char| c == '<' || c == '>');
+                let data_uri = match build_data_uri(attachments_dir, local_path, &att.mime_type) {
+                    Some(uri) => uri,
+                    None => continue,
+                };
+                cid_map.insert(clean_cid.to_string(), data_uri);
+            }
+        }
+    }
+
+    if cid_map.is_empty() {
+        return html.to_string();
+    }
+
+    let mut result = html.to_string();
+    for (cid, data_uri) in &cid_map {
+        let pattern = format!("data-cid=\"{}\"", html_escape_attr(cid));
+        let replacement = format!("src=\"{}\"", data_uri);
+        result = result.replace(&pattern, &replacement);
+    }
+
+    result
+}
+
+fn build_data_uri(
+    attachments_dir: &std::path::Path,
+    local_path: &str,
+    mime_type: &str,
+) -> Option<String> {
+    let full_path = attachments_dir.join(local_path);
+    let data = std::fs::read(&full_path).ok()?;
+    let encoded = base64::engine::general_purpose::STANDARD.encode(&data);
+    Some(format!("data:{};base64,{}", mime_type, encoded))
+}
+
+fn html_escape_attr(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('"', "&quot;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
 }
 
 fn resolve_privacy_mode(
@@ -110,7 +184,7 @@ mod tests {
             subject: "Subject".to_string(),
             snippet: "Snippet".to_string(),
             from_address: from_address.to_string(),
-            from_name: "Trusted".to_string(),
+            from_name: "Sender".to_string(),
             to_list: vec![EmailAddress {
                 name: None,
                 address: "me@example.com".to_string(),
