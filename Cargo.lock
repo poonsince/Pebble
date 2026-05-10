@@ -3562,6 +3562,7 @@ dependencies = [
  "lol_html",
  "pebble-core",
  "thiserror 2.0.18",
+ "tracing",
 ]
 
 [[package]]

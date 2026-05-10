@@ -2,6 +2,7 @@ use std::collections::HashSet;
 
 use ammonia::Builder;
 use pebble_core::{PrivacyMode, RenderedHtml, TrackerInfo};
+use tracing::{debug, info, trace};
 
 use crate::tracker::{is_known_tracker, is_tracking_pixel};
 
@@ -19,6 +20,10 @@ impl PrivacyGuard {
         mode: &PrivacyMode,
     ) -> RenderedHtml {
         let source_html = if raw_html.trim().is_empty() && !body_text.is_empty() {
+            debug!(
+                body_len = body_text.len(),
+                "render_message_html: no HTML, wrapping plain text"
+            );
             format!(
                 r#"<pre class="pebble-plain-text-email">{}</pre>"#,
                 html_escape(body_text)
@@ -27,23 +32,102 @@ impl PrivacyGuard {
             raw_html.to_string()
         };
 
+        debug!(
+            raw_len = source_html.len(),
+            body_len = body_text.len(),
+            ?mode,
+            "render_message_html: starting HTML rendering"
+        );
         let mut rendered = self.render_safe_html(&source_html, mode);
         rendered.html = linkify_html_text_nodes(&rendered.html);
+        debug!(
+            rendered_len = rendered.html.len(),
+            trackers = rendered.trackers_blocked.len(),
+            images_blocked = rendered.images_blocked,
+            "render_message_html: complete"
+        );
         rendered
     }
 
     pub fn render_safe_html(&self, raw_html: &str, mode: &PrivacyMode) -> RenderedHtml {
+        info!(
+            input_len = raw_html.len(),
+            ?mode,
+            "render_safe_html: starting"
+        );
+
         let mut trackers_blocked: Vec<TrackerInfo> = Vec::new();
         let mut images_blocked: u32 = 0;
-        let body_html = extract_body_fragment(raw_html);
+
+        // Extract and clean <style> blocks BEFORE body extraction and
+        // ammonia sanitization. We preserve them separately because ammonia
+        // strips <style> tags (it treats them as `clean_content_tags`).
+        let (html_without_styles, cleaned_styles) = extract_and_clean_styles(raw_html);
+
+        if cleaned_styles.is_empty() {
+            trace!("render_safe_html: no <style> blocks found in input");
+        } else {
+            info!(
+                count = cleaned_styles.len(),
+                total_css_len = cleaned_styles.iter().map(|s| s.len()).sum::<usize>(),
+                "render_safe_html: extracted and cleaned style blocks"
+            );
+            // Log first 200 chars of first style block for debugging
+            if let Some(first) = cleaned_styles.first() {
+                let preview = &first[..first.len().min(200)];
+                debug!(css_preview = %preview, "render_safe_html: first style block preview");
+            }
+        }
+
+        let body_html = extract_body_fragment(&html_without_styles);
+        trace!(
+            body_len = body_html.len(),
+            "render_safe_html: extracted body fragment"
+        );
 
         // Pre-process images before ammonia sanitization
         let preprocessed =
             preprocess_images(&body_html, mode, &mut trackers_blocked, &mut images_blocked);
 
-        // Sanitize with ammonia
+        // Sanitize with ammonia (style tags are stripped by ammonia, but
+        // we re-inject the cleaned CSS afterwards.)
         let sanitizer = build_sanitizer(mode);
-        let clean_html = sanitizer.clean(&preprocessed).to_string();
+        let mut clean_html = sanitizer.clean(&preprocessed).to_string();
+        info!(
+            ammonia_len = clean_html.len(),
+            "render_safe_html: ammonia sanitization complete"
+        );
+
+        // Re-inject cleaned style blocks after sanitization
+        if !cleaned_styles.is_empty() {
+            let styles_joined = cleaned_styles.join("\n");
+            let style_tag = format!("<style>\n{}\n</style>", styles_joined);
+
+            let inj_pos = if let Some(head_end) = clean_html.find("</head>") {
+                debug!("render_safe_html: injecting style before </head>");
+                head_end
+            } else if let Some(body_start) = clean_html.find("<body") {
+                debug!("render_safe_html: injecting style after <body>");
+                if let Some(tag_end) = find_tag_end(&clean_html[body_start..]) {
+                    body_start + tag_end + 1
+                } else {
+                    0usize
+                }
+            } else {
+                debug!("render_safe_html: injecting style at position 0 (no document structure)");
+                0usize
+            };
+
+            clean_html.insert_str(inj_pos, &style_tag);
+            info!(
+                final_len = clean_html.len(),
+                "render_safe_html: style blocks re-injected"
+            );
+            trace!(
+                html_preview = &clean_html[..clean_html.len().min(300)],
+                "render_safe_html: output start"
+            );
+        }
 
         RenderedHtml {
             html: clean_html,
@@ -130,6 +214,7 @@ fn filter_css_properties(style: &str) -> String {
         "color",
         "background",
         "background-color",
+        "box-sizing",
         "font-family",
         "font-size",
         "font-style",
@@ -142,6 +227,9 @@ fn filter_css_properties(style: &str) -> String {
         "line-height",
         "letter-spacing",
         "word-spacing",
+        "word-break",
+        "overflow-wrap",
+        "word-wrap",
         "white-space",
         "vertical-align",
         "direction",
@@ -181,6 +269,7 @@ fn filter_css_properties(style: &str) -> String {
         "clear",
         "list-style",
         "list-style-type",
+        "list-style-position",
         "table-layout",
     ];
 
@@ -273,6 +362,229 @@ fn is_css_color_function(value: &str) -> bool {
     value[open_paren + 1..value.len() - 1]
         .chars()
         .all(|c| c.is_ascii_digit() || matches!(c, ' ' | '\t' | '.' | ',' | '%' | '/' | '+' | '-'))
+}
+
+/// Extract <style> blocks from HTML, clean their CSS content, and return
+/// (html_without_style_blocks, vec_of_cleaned_css).
+///
+/// This allows CSS from <head> to survive ammonia sanitization by extracting
+/// it beforehand, cleaning it, and re-injecting it into the body area where
+/// ammonia will preserve it (since we add "style" to the allowed tags).
+fn extract_and_clean_styles(html: &str) -> (String, Vec<String>) {
+    let mut cleaned_styles: Vec<String> = Vec::new();
+    let mut result = String::with_capacity(html.len());
+    let mut last_end = 0usize;
+    let mut idx = 0usize;
+
+    let html_lower = html.to_ascii_lowercase();
+    while idx < html.len() {
+        // Look for <style ...> or <style>
+        let remaining_lower = &html_lower[idx..];
+        let style_start = match find_ascii_case_insensitive(remaining_lower, "<style") {
+            Some(pos) => idx + pos,
+            None => break,
+        };
+
+        // Find end of opening tag
+        let tag_open = &html[style_start..];
+        let tag_end = match find_tag_end(tag_open) {
+            Some(end) => style_start + end + 1,
+            None => {
+                idx = style_start + 6;
+                continue;
+            }
+        };
+
+        // Check if it's actually a closing </style> that was matched
+        if tag_open[..tag_end - style_start].contains("</style") {
+            idx = tag_end;
+            continue;
+        }
+
+        // Find </style>
+        let after_open = &html_lower[tag_end..];
+        let close_pos = match find_ascii_case_insensitive(after_open, "</style") {
+            Some(p) => tag_end + p,
+            None => {
+                idx = tag_end;
+                continue;
+            }
+        };
+
+        // Extract the CSS content between <style> and </style>
+        let css_content = &html[tag_end..close_pos];
+
+        // Clean the CSS
+        let cleaned = clean_css_content(css_content);
+        if !cleaned.is_empty() {
+            cleaned_styles.push(cleaned);
+        }
+
+        // Add the text before <style> to result
+        result.push_str(&html[last_end..style_start]);
+        last_end = close_pos + 8; // skip past </style>
+        idx = last_end;
+    }
+
+    result.push_str(&html[last_end..]);
+    (result, cleaned_styles)
+}
+
+/// Clean CSS content by removing unsafe constructs while preserving
+/// legitimate email CSS rules.
+fn clean_css_content(css: &str) -> String {
+    // Remove CSS comments
+    let mut no_comments = String::with_capacity(css.len());
+    let mut in_block_comment = false;
+    let mut chars = css.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if in_block_comment {
+            if ch == '*' && chars.peek() == Some(&'/') {
+                chars.next();
+                in_block_comment = false;
+            }
+            continue;
+        }
+        if ch == '/' && chars.peek() == Some(&'*') {
+            chars.next();
+            in_block_comment = true;
+            continue;
+        }
+        no_comments.push(ch);
+    }
+    trace!(
+        css_len_before = css.len(),
+        css_len_after = no_comments.len(),
+        "clean_css_content: removed CSS comments"
+    );
+
+    // Remove @import rules (potential exfiltration vector).
+    // Use char_indices for safe UTF-8 advancement.
+    let mut result = String::with_capacity(no_comments.len());
+    let lowercase = no_comments.to_ascii_lowercase();
+    let mut pos = 0usize;
+    while pos < no_comments.len() {
+        // Check for @import at current position (all ASCII so byte check is safe)
+        if lowercase[pos..].starts_with("@import") {
+            // Skip past "@import" = 7 ASCII chars
+            let mut skip_end = pos + 7;
+            // Skip to end of semicolon or block
+            let mut in_paren = false;
+            while skip_end < no_comments.len() {
+                let c = no_comments[skip_end..].chars().next().unwrap_or('\0');
+                let c_len = c.len_utf8();
+                match c {
+                    ';' if !in_paren => {
+                        skip_end += c_len;
+                        break;
+                    }
+                    '(' => in_paren = true,
+                    ')' => in_paren = false,
+                    '{' => {
+                        skip_end += c_len;
+                        let mut depth = 1u32;
+                        while skip_end < no_comments.len() && depth > 0 {
+                            let bc = no_comments[skip_end..].chars().next().unwrap_or('\0');
+                            match bc {
+                                '{' => depth += 1,
+                                '}' => depth -= 1,
+                                _ => {}
+                            }
+                            skip_end += bc.len_utf8();
+                        }
+                        break;
+                    }
+                    _ => {}
+                }
+                skip_end += c_len;
+            }
+            debug!(
+                skip_len = skip_end - pos,
+                "clean_css_content: removed @import rule"
+            );
+            pos = skip_end;
+        } else {
+            let ch = no_comments[pos..].chars().next().unwrap_or('\0');
+            result.push(ch);
+            pos += ch.len_utf8();
+        }
+    }
+    trace!(
+        result_len = result.len(),
+        "clean_css_content: @import removal complete"
+    );
+
+    // Remove rules containing url(), expression(), javascript:, data:, etc.
+    let mut filtered = String::with_capacity(result.len());
+    let lower_result = result.to_ascii_lowercase();
+    let mut rule_start = 0;
+    while rule_start < result.len() {
+        let block_start = match result[rule_start..].find('{') {
+            Some(i) => rule_start + i,
+            None => {
+                filtered.push_str(&result[rule_start..]);
+                break;
+            }
+        };
+        let block_end = match find_matching_brace(&result, block_start) {
+            Some(i) => i + 1,
+            None => {
+                filtered.push_str(&result[rule_start..]);
+                break;
+            }
+        };
+
+        let rule = &result[rule_start..block_end];
+        let lower_rule = &lower_result[rule_start..block_end];
+
+        // Skip rules with dangerous patterns
+        let has_dangerous = [
+            "url(",
+            "expression(",
+            "javascript:",
+            "vbscript:",
+            "data:",
+            "\\",
+        ]
+        .iter()
+        .any(|&p| lower_rule.contains(p));
+
+        if !has_dangerous {
+            filtered.push_str(rule);
+        } else {
+            debug!(
+                rule = %rule[..rule.len().min(100)],
+                "clean_css_content: removed rule with unsafe content"
+            );
+        }
+
+        rule_start = block_end;
+    }
+
+    let result = filtered.trim().to_string();
+    trace!(
+        final_len = result.len(),
+        "clean_css_content: complete"
+    );
+    result
+}
+
+/// Find the matching closing brace for an opening brace.
+fn find_matching_brace(s: &str, open_pos: usize) -> Option<usize> {
+    let mut depth = 1u32;
+    for (i, &b) in s.as_bytes()[open_pos + 1..].iter().enumerate() {
+        match b as char {
+            '{' => depth += 1,
+            '}' => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(open_pos + 1 + i);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
 }
 
 /// Build an ammonia sanitizer configured for safe email HTML rendering.
@@ -848,12 +1160,13 @@ mod tests {
     }
 
     #[test]
-    fn test_removes_style_tags() {
+    fn test_preserves_safe_style_tags() {
         let guard = PrivacyGuard::new();
         let html = "<p>Hello</p><style>body { color: red; }</style><p>World</p>";
         let result = guard.render_safe_html(html, &PrivacyMode::Strict);
-        assert!(!result.html.contains("<style>"));
-        assert!(!result.html.contains("color: red"));
+        // Safe CSS in <style> blocks is now preserved for email rendering
+        assert!(result.html.contains("<style>"));
+        assert!(result.html.contains("color: red"));
         assert!(result.html.contains("Hello"));
         assert!(result.html.contains("World"));
     }
@@ -999,14 +1312,15 @@ mod tests {
     }
 
     #[test]
-    fn render_safe_html_uses_body_fragment_from_full_documents() {
+    fn render_safe_html_preserves_style_from_head() {
         let guard = PrivacyGuard::new();
         let html = r#"<html><head><title>Leaked subject</title><style>p{color:red}</style></head><body><p>Visible body</p></body></html>"#;
         let result = guard.render_safe_html(html, &PrivacyMode::Strict);
 
         assert!(result.html.contains("Visible body"));
         assert!(!result.html.contains("Leaked subject"));
-        assert!(!result.html.contains("p{color:red}"));
+        // Safe <style> blocks from <head> are now preserved for email CSS
+        assert!(result.html.contains("p{color:red}"));
     }
 
     #[test]
