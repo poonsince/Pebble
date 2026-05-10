@@ -98,6 +98,13 @@ function isSafeBackgroundShorthandValue(value: string): boolean {
     debugLog("background-check", `dangerous pattern in value: "${normalized}" -> reject`);
     return false;
   }
+
+  // url() in background shorthand is now allowed in all privacy modes
+  if (/url\s*\(/i.test(normalized)) {
+    debugLog("background-check", `url() allowed: "${normalized.slice(0, 80)}"`);
+    return true;
+  }
+
   if (["none", "transparent", "currentcolor"].includes(normalized)) return true;
   if (/^#[0-9a-f]{3,8}$/i.test(normalized)) return true;
   if (/^(rgb|rgba|hsl|hsla)\([\d\s.,%/+-]+\)$/i.test(normalized)) return true;

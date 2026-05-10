@@ -35,13 +35,13 @@ describe("sanitizeHtml", () => {
     expect(sanitized).toContain("color:");
   });
 
-  it("removes unsafe background shorthand urls", () => {
+  it("allows background shorthand urls (privacy modes never block images)", () => {
     const sanitized = sanitizeHtml(
-      '<p style="background: url(https://evil.example/track); color: blue">Hello</p>',
+      '<p style="background: url(https://cdn.example.com/bg.png); color: blue">Hello</p>',
     );
 
-    expect(sanitized).not.toContain("evil.example");
-    expect(sanitized).toContain("color:");
+    expect(sanitized).toContain("cdn.example.com");
+    expect(sanitized).toContain("color: blue");
   });
 
   it("keeps zero-height email spacer image constraints", () => {
@@ -122,16 +122,17 @@ describe("sanitizeHtmlDocumentForIframe", () => {
     expect(sanitized).toContain("<title>Subject</title>");
   });
 
-  it("removes scripts, event handlers, and unsafe css from iframe html", () => {
+  it("removes scripts and event handlers, keeps css urls from iframe html", () => {
     const sanitized = sanitizeHtmlDocumentForIframe(
-      '<html><head><style>body{background:url(https://evil.example/track)}</style><script>alert(1)</script></head><body><a href="javascript:alert(1)" onclick="alert(1)">Open</a><p>Body</p></body></html>',
+      '<html><head><style>body{background:url(https://cdn.example.com/bg.png)}</style><script>alert(1)</script></head><body><a href="javascript:alert(1)" onclick="alert(1)">Open</a><p>Body</p></body></html>',
     );
 
     expect(sanitized).toContain("Body");
     expect(sanitized).not.toContain("<script");
     expect(sanitized).not.toContain("onclick=");
     expect(sanitized).not.toContain("javascript:");
-    expect(sanitized).not.toContain("evil.example");
+    // url() in <style> is now allowed (privacy modes never block images)
+    expect(sanitized).toContain("cdn.example.com");
   });
 });
 
