@@ -233,7 +233,12 @@ fn find_tag_end(html: &str) -> Option<usize> {
 }
 
 /// Parse a CSS style string and keep only properties from the safe allowlist.
-fn filter_css_properties(style: &str) -> String {
+///
+/// In `Off` or `TrustSender` mode, external URLs in CSS (e.g. `background: url(...)`)
+/// are allowed so legitimate email decorations render correctly. In `Strict`/`LoadOnce`
+/// mode, `url()` and similar resource-loading CSS functions are blocked to prevent
+/// CSS-based tracking and data exfiltration.
+fn filter_css_properties(style: &str, mode: &PrivacyMode) -> String {
     const SAFE_PROPERTIES: &[&str] = &[
         "color",
         "background",
@@ -311,25 +316,41 @@ fn filter_css_properties(style: &str) -> String {
                 removed_props.push(format!("{prop} (not in allowlist)"));
                 return None;
             }
-            if prop == "background" && !is_safe_background_shorthand_value(&value) {
-                removed_props.push(format!("background: {value} (unsafe)"));
-                return None;
-            }
-            // Reject URL/script-bearing values and CSS escapes that can hide them.
-            if value.contains("url(")
-                || value.contains("image-set(")
-                || value.contains("-webkit-image-set(")
-                || value.contains("cross-fade(")
-                || value.contains("element(")
-                || value.contains("paint(")
-                || value.contains("expression(")
+            // Always block XSS vectors regardless of mode
+            if value.contains("expression(")
                 || value.contains("javascript:")
                 || value.contains("vbscript:")
                 || value.contains("data:")
-                || value.contains("@import")
-                || value.contains('\\')
             {
-                removed_props.push(format!("{prop}: {value} (dangerous)"));
+                removed_props.push(format!("{prop}: {value} (XSS vector)"));
+                return None;
+            }
+
+            // In Off / TrustSender mode, allow external URLs so email
+            // decorations (background images, etc.) work like in any
+            // regular mail client.
+            let is_restricted = matches!(mode, PrivacyMode::Strict | PrivacyMode::LoadOnce);
+
+            if is_restricted && prop == "background"
+                && !is_safe_background_shorthand_value(&value)
+            {
+                removed_props.push(format!("background: {value} (unsafe)"));
+                return None;
+            }
+
+            // Block resource-loading CSS in Strict/LoadOnce mode (prevents
+            // CSS-based tracking pixels and exfiltration via url()).
+            if is_restricted
+                && (value.contains("url(")
+                    || value.contains("image-set(")
+                    || value.contains("-webkit-image-set(")
+                    || value.contains("cross-fade(")
+                    || value.contains("element(")
+                    || value.contains("paint(")
+                    || value.contains("@import")
+                    || value.contains('\\'))
+            {
+                removed_props.push(format!("{prop}: {value} (restricted in current mode)"));
                 return None;
             }
             Some((*decl).to_string())
@@ -624,7 +645,7 @@ fn find_matching_brace(s: &str, open_pos: usize) -> Option<usize> {
 }
 
 /// Build an ammonia sanitizer configured for safe email HTML rendering.
-fn build_sanitizer(_mode: &PrivacyMode) -> Builder<'static> {
+fn build_sanitizer(mode: &PrivacyMode) -> Builder<'static> {
     let mut builder = Builder::new();
 
     // Allow safe tags for email HTML
@@ -757,9 +778,10 @@ fn build_sanitizer(_mode: &PrivacyMode) -> Builder<'static> {
     builder.link_rel(Some("noopener noreferrer"));
 
     // Filter style attributes using a CSS property allowlist
-    builder.attribute_filter(|_element, attribute, value| {
+    let mode = mode.clone();
+    builder.attribute_filter(move |_element, attribute, value| {
         if attribute == "style" {
-            let filtered = filter_css_properties(value);
+            let filtered = filter_css_properties(value, &mode);
             if filtered.is_empty() {
                 None
             } else {
