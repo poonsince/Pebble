@@ -2,7 +2,7 @@ use std::collections::HashSet;
 
 use ammonia::Builder;
 use pebble_core::{PrivacyMode, RenderedHtml, TrackerInfo};
-use tracing::{debug, info, trace, warn};
+use tracing::{debug, info, trace};
 
 use crate::tracker::{is_known_tracker, is_tracking_pixel};
 
@@ -127,43 +127,19 @@ impl PrivacyGuard {
             "render_safe_html: ammonia before/after start"
         );
 
-        // Re-inject cleaned style blocks after sanitization
+        // Re-inject cleaned style blocks after sanitization.
+        // Wrap the output in a proper HTML document structure so that
+        // <style> lives in <head>. This is critical because DOMPurify
+        // strips <style> tags from document fragments (no <html>/<head>).
         if !cleaned_styles.is_empty() {
             let styles_joined = cleaned_styles.join("\n");
-            let style_tag = format!("<style>\n{}\n</style>", styles_joined);
-            debug!(
-                style_tag_len = style_tag.len(),
-                style_tag_preview = &styles_joined[..styles_joined.len().min(200)],
-                "render_safe_html: style tag to inject"
+            clean_html = format!(
+                "<html><head><style>\n{}\n</style></head><body>{}</body></html>",
+                styles_joined, clean_html
             );
-
-            let inj_pos = if let Some(head_end) = clean_html.find("</head>") {
-                debug!("render_safe_html: injecting style before </head> (pos={})", head_end);
-                head_end
-            } else if let Some(body_start) = clean_html.find("<body") {
-                debug!("render_safe_html: injecting style after <body> (body_start={})", body_start);
-                if let Some(tag_end) = find_tag_end(&clean_html[body_start..]) {
-                    let pos = body_start + tag_end + 1;
-                    debug!("render_safe_html: <body> tag end at +{}, injection pos={}", tag_end, pos);
-                    pos
-                } else {
-                    warn!("render_safe_html: found <body> but could not find tag end");
-                    0usize
-                }
-            } else {
-                debug!("render_safe_html: injecting style at position 0 (no document structure)");
-                let has_html_like = clean_html.contains('<') && clean_html.contains('>');
-                if has_html_like {
-                    trace!("render_safe_html: output has HTML content (no document tags)");
-                }
-                0usize
-            };
-
-            clean_html.insert_str(inj_pos, &style_tag);
             info!(
                 final_len = clean_html.len(),
-                injected_len = style_tag.len(),
-                "render_safe_html: style blocks re-injected"
+                "render_safe_html: output wrapped in full HTML doc with style in <head>"
             );
             trace!(
                 html_preview = &clean_html[..clean_html.len().min(500)],
