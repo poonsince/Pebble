@@ -25,7 +25,9 @@ export function ShadowDomEmail({ html, className }: ShadowDomEmailProps) {
     const safeHtml = sanitizeHtmlDocumentForIframe(html);
     const result = wrapHtmlDocumentForIframe(safeHtml, isDarkThemeActive());
     // eslint-disable-next-line no-console
-    console.log(`[ShadowDomEmail] srcDoc produced: len=${result.length}, first 300="${result.slice(0, 300)}..."`);
+    console.log(`[ShadowDomEmail] srcDoc produced: len=${result.length}`);
+    // eslint-disable-next-line no-console
+    console.log(`[ShadowDomEmail] srcDoc FULL:\n${result}`);
     return result;
   }, [html]);
 

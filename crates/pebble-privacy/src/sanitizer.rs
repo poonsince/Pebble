@@ -147,6 +147,12 @@ impl PrivacyGuard {
             );
         }
 
+        info!(
+            output_len = clean_html.len(),
+            output_html = %clean_html,
+            "render_safe_html: final output HTML"
+        );
+
         RenderedHtml {
             html: clean_html,
             trackers_blocked,
@@ -284,6 +290,7 @@ fn filter_css_properties(style: &str) -> String {
         "overflow-y",
         "visibility",
         "float",
+        "font",
         "clear",
         "list-style",
         "list-style-type",
@@ -293,6 +300,7 @@ fn filter_css_properties(style: &str) -> String {
 
     let parts: Vec<&str> = style.split(';').map(|s| s.trim()).filter(|s| !s.is_empty()).collect();
     let before = parts.len();
+    let mut removed_props: Vec<String> = Vec::new();
     let allowed: Vec<String> = parts
         .iter()
         .filter_map(|decl| {
@@ -300,11 +308,11 @@ fn filter_css_properties(style: &str) -> String {
             let prop = decl[..colon].trim().to_lowercase();
             let value = decl[colon + 1..].trim().to_lowercase();
             if !SAFE_PROPERTIES.contains(&prop.as_str()) {
-                trace!(%prop, "filter_css_properties: property not in allowlist");
+                removed_props.push(format!("{prop} (not in allowlist)"));
                 return None;
             }
             if prop == "background" && !is_safe_background_shorthand_value(&value) {
-                trace!(%value, "filter_css_properties: background shorthand rejected");
+                removed_props.push(format!("background: {value} (unsafe)"));
                 return None;
             }
             // Reject URL/script-bearing values and CSS escapes that can hide them.
@@ -321,17 +329,19 @@ fn filter_css_properties(style: &str) -> String {
                 || value.contains("@import")
                 || value.contains('\\')
             {
+                removed_props.push(format!("{prop}: {value} (dangerous)"));
                 return None;
             }
             Some((*decl).to_string())
         })
         .collect::<Vec<String>>();
 
-    if allowed.len() != before {
-        trace!(
+    if !removed_props.is_empty() {
+        info!(
             before,
             after = allowed.len(),
-            "filter_css_properties: some properties removed"
+            removed = removed_props.join("; "),
+            "filter_css_properties: inline style properties removed"
         );
     }
     allowed.join("; ")
