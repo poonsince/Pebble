@@ -31,7 +31,8 @@ describe("ShadowDomEmail", () => {
 
     const iframe = container.querySelector("iframe");
     expect(iframe).not.toBeNull();
-    expect(iframe?.getAttribute("sandbox")).toBe("allow-same-origin");
+    // sandbox intentionally removed (causes CDN 405 errors)
+    expect(iframe?.getAttribute("sandbox")).toBeNull();
     expect(iframe?.getAttribute("srcdoc")).toContain(".card{max-width:600px}");
     expect(iframe?.getAttribute("srcdoc")).toContain("Hello");
   });

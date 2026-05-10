@@ -286,6 +286,15 @@ function ensureIframeDocumentHead(document_: Document, supportStyles: string): v
     document_.head.prepend(meta);
   }
 
+  // Send full Referer for subresource requests (images, etc.) so CDNs
+  // with hotlink protection (e.g. NetEase nosdn.127.net) accept them.
+  if (!document_.head.querySelector('meta[name="referrer"]')) {
+    const referrer = document_.createElement("meta");
+    referrer.setAttribute("name", "referrer");
+    referrer.setAttribute("content", "unsafe-url");
+    document_.head.prepend(referrer);
+  }
+
   if (!document_.head.querySelector('meta[name="viewport"]')) {
     const meta = document_.createElement("meta");
     meta.setAttribute("name", "viewport");
