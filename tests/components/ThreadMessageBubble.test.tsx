@@ -58,7 +58,7 @@ describe("ThreadMessageBubble", () => {
     render(<ThreadMessageBubble message={message} defaultExpanded />);
 
     await waitFor(() => {
-      expect(getRenderedHtml).toHaveBeenCalledWith("message-1", "LoadOnce");
+      expect(getRenderedHtml).toHaveBeenCalledWith("message-1", "Normal");
     });
   });
 

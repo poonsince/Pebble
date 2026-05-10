@@ -24,7 +24,7 @@ export function privacyModeToApi(mode: StoredPrivacyMode): PrivacyMode {
     case "off":
       return "Off";
     case "relaxed":
-      return "LoadOnce";
+      return "Normal";
   }
 }
 

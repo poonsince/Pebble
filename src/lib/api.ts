@@ -31,7 +31,7 @@ export type {
   ThreadSummary,
   TranslateConfig,
   TranslateResult,
-  TrustedSender,
+  UntrustedSender,
 } from "./ipc-types";
 
 import type {
@@ -63,7 +63,7 @@ import type {
   ThreadSummary,
   TranslateConfig,
   TranslateResult,
-  TrustedSender,
+  UntrustedSender,
 } from "./ipc-types";
 
 // ─── Account API ─────────────────────────────────────────────────────────────
@@ -311,22 +311,22 @@ export async function listPendingMailOps(
   return invoke<PendingMailOp[]>("list_pending_mail_ops", { accountId, limit });
 }
 
-// ─── Trusted Senders API ────────────────────────────────────────────────────
+// ─── Untrusted Senders API ──────────────────────────────────────────────────
 
-export async function listTrustedSenders(accountId: string): Promise<TrustedSender[]> {
-  return invoke<TrustedSender[]>("list_trusted_senders", { accountId });
+export async function listUntrustedSenders(accountId: string): Promise<UntrustedSender[]> {
+  return invoke<UntrustedSender[]>("list_untrusted_senders", { accountId });
 }
 
-export async function removeTrustedSender(accountId: string, email: string): Promise<void> {
-  return invoke<void>("remove_trusted_sender", { accountId, email });
+export async function removeUntrustedSender(accountId: string, email: string): Promise<void> {
+  return invoke<void>("remove_untrusted_sender", { accountId, email });
 }
 
-export async function trustSender(accountId: string, email: string, trustType: "images" | "all"): Promise<void> {
-  return invoke<void>("trust_sender", { accountId, email, trustType });
+export async function addUntrustedSender(accountId: string, email: string): Promise<void> {
+  return invoke<void>("add_untrusted_sender", { accountId, email });
 }
 
-export async function isTrustedSender(accountId: string, email: string): Promise<boolean> {
-  return invoke<boolean>("is_trusted_sender", { accountId, email });
+export async function isUntrustedSender(accountId: string, email: string): Promise<boolean> {
+  return invoke<boolean>("is_untrusted_sender", { accountId, email });
 }
 
 // ─── Search API ──────────────────────────────────────────────────────────────

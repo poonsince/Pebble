@@ -1,0 +1,425 @@
+From eff42e8fa64567f46d1bdc0e268a4f5bc05fbe9d Mon Sep 17 00:00:00 2001
+From: since <poon.since@gmail.com>
+Date: Fri, 8 May 2026 01:14:46 +0800
+Subject: [PATCH] Compatible with Ubuntu 22.04
+
+---
+ index.html                   | 25 +++++++++++++++++++++++++
+ src-tauri/src/lib.rs         | 14 ++++++++++++++
+ src-tauri/tauri.conf.json    |  7 ++++---
+ src/lib/browserStorage.ts    | 34 ++++++++++++++++++++++++++++++++++
+ src/lib/language.ts          |  4 +++-
+ src/lib/privacyMode.ts       |  3 ++-
+ src/lib/signatures.ts        |  5 ++---
+ src/lib/templates.ts         |  5 ++---
+ src/stores/kanban.store.ts   |  5 +++--
+ src/stores/shortcut.store.ts |  7 ++++---
+ src/stores/ui.store.ts       | 31 ++++++++++++++++---------------
+ vite.config.ts               |  2 ++
+ 12 files changed, 111 insertions(+), 31 deletions(-)
+ create mode 100644 src/lib/browserStorage.ts
+
+diff --git a/index.html b/index.html
+index 816e515..5fd5f42 100644
+--- a/index.html
++++ b/index.html
+@@ -108,6 +108,31 @@
+       window.__splashStart=Date.now();
+       // Apply saved theme immediately to avoid flash of wrong theme
+       try{var t=localStorage.getItem('pebble-theme')||'light';var d=t==='system'?matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light':t;document.documentElement.setAttribute('data-theme',d)}catch(e){}
++      window.__showPebbleBootError=function(details){
++        try{
++          var splash=document.getElementById('splash');
++          if(!splash)return;
++          splash.innerHTML='' +
++            '<div style="max-width:560px;padding:24px;color:#e5e5e5;text-align:left;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,system-ui,sans-serif">' +
++            '<div style="font-size:18px;font-weight:600;margin-bottom:12px">Pebble failed to start</div>' +
++            '<div style="font-size:13px;line-height:1.5;opacity:.9;margin-bottom:12px">The frontend crashed before the app could render. Check the application log and JavaScript error below.</div>' +
++            '<pre style="white-space:pre-wrap;word-break:break-word;background:rgba(255,255,255,.06);padding:12px;border-radius:8px;font-size:12px;line-height:1.4;margin:0">' + String(details || 'Unknown startup error') + '</pre>' +
++            '</div>';
++        }catch(_){}
++      };
++      window.addEventListener('error', function(event){
++        var message = event && event.error && event.error.stack
++          ? event.error.stack
++          : (event && event.message) || 'Unknown startup error';
++        window.__showPebbleBootError(message);
++      });
++      window.addEventListener('unhandledrejection', function(event){
++        var reason = event && event.reason;
++        var message = reason && reason.stack
++          ? reason.stack
++          : String(reason || 'Unhandled promise rejection during startup');
++        window.__showPebbleBootError(message);
++      });
+     </script>
+     <div id="splash">
+       <svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+diff --git a/src-tauri/src/lib.rs b/src-tauri/src/lib.rs
+index 7805eda..6d03e67 100644
+--- a/src-tauri/src/lib.rs
++++ b/src-tauri/src/lib.rs
+@@ -228,8 +228,18 @@ fn take_pending_mailto_urls(state: tauri::State<PendingMailtoUrls>) -> Vec<Strin
+     }
+ }
+ 
++#[cfg(target_os = "linux")]
++fn configure_linux_webkit_env() {
++    if std::env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER").is_none() {
++        std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
++    }
++}
++
+ #[cfg_attr(mobile, tauri::mobile_entry_point)]
+ pub fn run() {
++    #[cfg(target_os = "linux")]
++    configure_linux_webkit_env();
++
+     let mut builder = tauri::Builder::default();
+ 
+     #[cfg(desktop)]
+@@ -435,6 +445,10 @@ pub fn run() {
+                 startup_start.elapsed().as_millis()
+             );
+ 
++            // Show main window on first launch (single-instance plugin only
++            // shows it on subsequent launches)
++            restore_main_window(&app.handle().clone());
++
+             Ok(())
+         })
+         .invoke_handler(tauri::generate_handler![
+diff --git a/src-tauri/tauri.conf.json b/src-tauri/tauri.conf.json
+index 09df9de..4abaad2 100644
+--- a/src-tauri/tauri.conf.json
++++ b/src-tauri/tauri.conf.json
+@@ -11,7 +11,7 @@
+   },
+   "bundle": {
+     "active": true,
+-    "targets": ["nsis"],
++    "targets": ["deb"],
+     "icon": [
+       "icons/32x32.png",
+       "icons/128x128.png",
+@@ -30,7 +30,7 @@
+   },
+   "app": {
+     "security": {
+-      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self' https://api.github.com; font-src 'self' data:; frame-src 'none'; object-src 'none';"
++      "csp": "default-src 'self'; script-src 'self' 'unsafe-eval' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self' https://api.github.com; font-src 'self' data:; frame-src 'none'; object-src 'none';"
+     },
+     "windows": [
+       {
+@@ -44,7 +44,8 @@
+         "resizable": true,
+         "center": true,
+         "visible": false,
+-        "backgroundColor": "#1a1a1a"
++        "backgroundColor": "#1a1a1a",
++        "devtools": true
+       }
+     ]
+   }
+diff --git a/src/lib/browserStorage.ts b/src/lib/browserStorage.ts
+new file mode 100644
+index 0000000..39f6cd3
+--- /dev/null
++++ b/src/lib/browserStorage.ts
+@@ -0,0 +1,34 @@
++type ReadableStorageLike = Pick<Storage, "getItem">;
++type WritableStorageLike = Pick<Storage, "setItem" | "removeItem">;
++
++function warnStorageAccess(kind: "read" | "write" | "remove", key: string, error: unknown) {
++  console.warn(`[storage] Failed to ${kind} '${key}'`, error);
++}
++
++export function safeGetItem(storage: ReadableStorageLike | undefined, key: string): string | null {
++  if (!storage) return null;
++  try {
++    return storage.getItem(key);
++  } catch (error) {
++    warnStorageAccess("read", key, error);
++    return null;
++  }
++}
++
++export function safeSetItem(storage: WritableStorageLike | undefined, key: string, value: string) {
++  if (!storage) return;
++  try {
++    storage.setItem(key, value);
++  } catch (error) {
++    warnStorageAccess("write", key, error);
++  }
++}
++
++export function safeRemoveItem(storage: WritableStorageLike | undefined, key: string) {
++  if (!storage) return;
++  try {
++    storage.removeItem(key);
++  } catch (error) {
++    warnStorageAccess("remove", key, error);
++  }
++}
+diff --git a/src/lib/language.ts b/src/lib/language.ts
+index 7812bf3..7e2ca9a 100644
+--- a/src/lib/language.ts
++++ b/src/lib/language.ts
+@@ -1,3 +1,5 @@
++import { safeGetItem } from "@/lib/browserStorage";
++
+ export type Language = "en" | "zh";
+ 
+ export const LANGUAGE_STORAGE_KEY = "pebble-language";
+@@ -18,5 +20,5 @@ export function getInitialLanguage(
+   storage: LanguageStorage = localStorage,
+   source: NavigatorLanguageSource = navigator,
+ ): Language {
+-  return normalizeSavedLanguage(storage.getItem(LANGUAGE_STORAGE_KEY)) ?? detectSystemLanguage(source);
++  return normalizeSavedLanguage(safeGetItem(storage, LANGUAGE_STORAGE_KEY)) ?? detectSystemLanguage(source);
+ }
+diff --git a/src/lib/privacyMode.ts b/src/lib/privacyMode.ts
+index 8576da9..373bb11 100644
+--- a/src/lib/privacyMode.ts
++++ b/src/lib/privacyMode.ts
+@@ -1,3 +1,4 @@
++import { safeGetItem } from "@/lib/browserStorage";
+ import type { PrivacyMode } from "@/lib/api";
+ 
+ export const PRIVACY_MODE_KEY = "pebble-privacy-mode";
+@@ -12,7 +13,7 @@ export function isStoredPrivacyMode(value: string | null): value is StoredPrivac
+ export function readStoredPrivacyMode(
+   storage: Pick<Storage, "getItem"> = localStorage,
+ ): StoredPrivacyMode {
+-  const saved = storage.getItem(PRIVACY_MODE_KEY);
++  const saved = safeGetItem(storage, PRIVACY_MODE_KEY);
+   return isStoredPrivacyMode(saved) ? saved : DEFAULT_STORED_PRIVACY_MODE;
+ }
+ 
+diff --git a/src/lib/signatures.ts b/src/lib/signatures.ts
+index ce738f7..e97f3cb 100644
+--- a/src/lib/signatures.ts
++++ b/src/lib/signatures.ts
+@@ -1,11 +1,10 @@
+ import { invoke } from "@tauri-apps/api/core";
++import { safeRemoveItem } from "@/lib/browserStorage";
+ 
+ const LEGACY_STORAGE_KEY = "pebble-signatures";
+ 
+ function clearLegacySignatures() {
+-  try {
+-    localStorage.removeItem(LEGACY_STORAGE_KEY);
+-  } catch { /* ignored */ }
++  safeRemoveItem(localStorage, LEGACY_STORAGE_KEY);
+ }
+ 
+ export async function getSignature(accountId: string): Promise<string> {
+diff --git a/src/lib/templates.ts b/src/lib/templates.ts
+index 09ce98f..24e8b63 100644
+--- a/src/lib/templates.ts
++++ b/src/lib/templates.ts
+@@ -1,4 +1,5 @@
+ import { invoke } from "@tauri-apps/api/core";
++import { safeRemoveItem } from "@/lib/browserStorage";
+ 
+ const LEGACY_STORAGE_KEY = "pebble-templates";
+ 
+@@ -11,9 +12,7 @@ export interface EmailTemplate {
+ }
+ 
+ function clearLegacyTemplates() {
+-  try {
+-    localStorage.removeItem(LEGACY_STORAGE_KEY);
+-  } catch { /* ignored */ }
++  safeRemoveItem(localStorage, LEGACY_STORAGE_KEY);
+ }
+ 
+ export async function listTemplates(): Promise<EmailTemplate[]> {
+diff --git a/src/stores/kanban.store.ts b/src/stores/kanban.store.ts
+index 0422257..a344942 100644
+--- a/src/stores/kanban.store.ts
++++ b/src/stores/kanban.store.ts
+@@ -1,4 +1,5 @@
+ import { create } from "zustand";
++import { safeGetItem, safeRemoveItem } from "@/lib/browserStorage";
+ import type { KanbanCard, KanbanColumnType } from "@/lib/api";
+ import {
+   listKanbanCards,
+@@ -27,7 +28,7 @@ const LEGACY_CONTEXT_NOTES_STORAGE_KEY = "pebble-kanban-context-notes";
+ function loadLegacyContextNotes(): Record<string, string> {
+   if (typeof localStorage === "undefined") return {};
+   try {
+-    const parsed = JSON.parse(localStorage.getItem(LEGACY_CONTEXT_NOTES_STORAGE_KEY) || "{}");
++    const parsed = JSON.parse(safeGetItem(localStorage, LEGACY_CONTEXT_NOTES_STORAGE_KEY) || "{}");
+     return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+   } catch {
+     return {};
+@@ -36,7 +37,7 @@ function loadLegacyContextNotes(): Record<string, string> {
+ 
+ let legacyContextNotes = loadLegacyContextNotes();
+ if (typeof localStorage !== "undefined") {
+-  localStorage.removeItem(LEGACY_CONTEXT_NOTES_STORAGE_KEY);
++  safeRemoveItem(localStorage, LEGACY_CONTEXT_NOTES_STORAGE_KEY);
+ }
+ 
+ async function loadContextNotes(): Promise<Record<string, string>> {
+diff --git a/src/stores/shortcut.store.ts b/src/stores/shortcut.store.ts
+index c3cb0b4..8e3169d 100644
+--- a/src/stores/shortcut.store.ts
++++ b/src/stores/shortcut.store.ts
+@@ -1,4 +1,5 @@
+ import { create } from "zustand";
++import { safeGetItem, safeRemoveItem, safeSetItem } from "@/lib/browserStorage";
+ 
+ export interface ShortcutBinding {
+   actionId: string;
+@@ -39,7 +40,7 @@ const STORAGE_KEY = "pebble-shortcuts";
+ 
+ function loadBindings(): Record<string, string> {
+   try {
+-    const saved = localStorage.getItem(STORAGE_KEY);
++    const saved = safeGetItem(localStorage, STORAGE_KEY);
+     if (saved) return { ...DEFAULT_BINDINGS, ...JSON.parse(saved) };
+   } catch {
+     // ignore parse errors
+@@ -52,11 +53,11 @@ export const useShortcutStore = create<ShortcutState>((set, get) => ({
+   recording: null,
+   updateShortcut: (actionId, keys) => {
+     const newBindings = { ...get().bindings, [actionId]: keys };
+-    localStorage.setItem(STORAGE_KEY, JSON.stringify(newBindings));
++    safeSetItem(localStorage, STORAGE_KEY, JSON.stringify(newBindings));
+     set({ bindings: newBindings, recording: null });
+   },
+   resetToDefaults: () => {
+-    localStorage.removeItem(STORAGE_KEY);
++    safeRemoveItem(localStorage, STORAGE_KEY);
+     set({ bindings: { ...DEFAULT_BINDINGS } });
+   },
+   startRecording: (actionId) => set({ recording: actionId }),
+diff --git a/src/stores/ui.store.ts b/src/stores/ui.store.ts
+index 3b01334..8b62fee 100644
+--- a/src/stores/ui.store.ts
++++ b/src/stores/ui.store.ts
+@@ -1,4 +1,5 @@
+ import { create } from "zustand";
++import { safeGetItem, safeSetItem } from "@/lib/browserStorage";
+ import i18n from "@/lib/i18n";
+ import { getInitialLanguage, LANGUAGE_STORAGE_KEY, type Language } from "@/lib/language";
+ import { useComposeStore } from "./compose.store";
+@@ -27,19 +28,19 @@ const NOTIFICATIONS_KEY = "pebble-notifications-enabled";
+ const KEEP_RUNNING_BACKGROUND_KEY = "pebble-keep-running-background";
+ 
+ function readRealtimePreference(): RealtimePreference {
+-  const stored = localStorage.getItem(REALTIME_PREFERENCE_KEY);
++  const stored = safeGetItem(localStorage, REALTIME_PREFERENCE_KEY);
+   return REALTIME_PREFERENCES.has(stored as RealtimePreference)
+     ? (stored as RealtimePreference)
+     : "realtime";
+ }
+ 
+ export function readNotificationsEnabledPreference(): boolean {
+-  const stored = localStorage.getItem(NOTIFICATIONS_KEY);
++  const stored = safeGetItem(localStorage, NOTIFICATIONS_KEY);
+   return stored === null ? true : stored === "true";
+ }
+ 
+ export function readKeepRunningInBackgroundPreference(): boolean {
+-  const stored = localStorage.getItem(KEEP_RUNNING_BACKGROUND_KEY);
++  const stored = safeGetItem(localStorage, KEEP_RUNNING_BACKGROUND_KEY);
+   return stored === null ? true : stored === "true";
+ }
+ 
+@@ -114,7 +115,7 @@ interface UIState {
+ export const useUIStore = create<UIState>((set) => ({
+   sidebarCollapsed: false,
+   activeView: "inbox",
+-  theme: (localStorage.getItem("pebble-theme") as Theme) || "light",
++  theme: (safeGetItem(localStorage, "pebble-theme") as Theme) || "light",
+   language: initialLanguage,
+   syncStatus: "idle",
+   networkStatus: "online",
+@@ -123,12 +124,12 @@ export const useUIStore = create<UIState>((set) => ({
+   realtimeMode: initialRealtimeMode,
+   notificationsEnabled: initialNotificationsEnabled,
+   setNotificationsEnabled: (enabled) => {
+-    localStorage.setItem(NOTIFICATIONS_KEY, String(enabled));
++    safeSetItem(localStorage, NOTIFICATIONS_KEY, String(enabled));
+     set({ notificationsEnabled: enabled });
+   },
+   keepRunningInBackground: initialKeepRunningInBackground,
+   setKeepRunningInBackground: (enabled) => {
+-    localStorage.setItem(KEEP_RUNNING_BACKGROUND_KEY, String(enabled));
++    safeSetItem(localStorage, KEEP_RUNNING_BACKGROUND_KEY, String(enabled));
+     set({ keepRunningInBackground: enabled });
+   },
+   previousView: "inbox",
+@@ -170,13 +171,13 @@ export const useUIStore = create<UIState>((set) => ({
+     set({ activeView: "inbox" });
+   },
+   setTheme: (theme) => {
+-    localStorage.setItem("pebble-theme", theme);
++    safeSetItem(localStorage, "pebble-theme", theme);
+     applyThemeToDom(theme);
+     set({ theme });
+   },
+   setLanguage: (lang) => {
+     i18n.changeLanguage(lang);
+-    localStorage.setItem(LANGUAGE_STORAGE_KEY, lang);
++    safeSetItem(localStorage, LANGUAGE_STORAGE_KEY, lang);
+     set({ language: lang });
+   },
+   setSyncStatus: (status) => set({ syncStatus: status }),
+@@ -191,8 +192,8 @@ export const useUIStore = create<UIState>((set) => ({
+     })),
+   setRealtimeMode: (mode) => {
+     const pollInterval = realtimePreferenceToPollInterval(mode);
+-    localStorage.setItem(REALTIME_PREFERENCE_KEY, mode);
+-    localStorage.setItem("pebble-poll-interval", String(pollInterval));
++    safeSetItem(localStorage, REALTIME_PREFERENCE_KEY, mode);
++    safeSetItem(localStorage, "pebble-poll-interval", String(pollInterval));
+     set({
+       realtimeMode: mode,
+       pollInterval,
+@@ -200,21 +201,21 @@ export const useUIStore = create<UIState>((set) => ({
+   },
+   pollInterval: realtimePreferenceToPollInterval(initialRealtimeMode),
+   setPollInterval: (secs) => {
+-    localStorage.setItem("pebble-poll-interval", String(secs));
++    safeSetItem(localStorage, "pebble-poll-interval", String(secs));
+     set({ pollInterval: secs });
+   },
+   searchQuery: "",
+   setSearchQuery: (q) => set({ searchQuery: q }),
+-  settingsTab: (sessionStorage.getItem("pebble-settings-tab") as SettingsTab) || "accounts",
++  settingsTab: (safeGetItem(sessionStorage, "pebble-settings-tab") as SettingsTab) || "accounts",
+   setSettingsTab: (tab) => {
+-    sessionStorage.setItem("pebble-settings-tab", tab);
++    safeSetItem(sessionStorage, "pebble-settings-tab", tab);
+     set({ settingsTab: tab });
+   },
+   pendingRuleDraftText: null,
+   setPendingRuleDraftText: (text) => set({ pendingRuleDraftText: text }),
+-  showFolderUnreadCount: localStorage.getItem("pebble-show-unread-count") === "true",
++  showFolderUnreadCount: safeGetItem(localStorage, "pebble-show-unread-count") === "true",
+   setShowFolderUnreadCount: (show) => {
+-    localStorage.setItem("pebble-show-unread-count", String(show));
++    safeSetItem(localStorage, "pebble-show-unread-count", String(show));
+     set({ showFolderUnreadCount: show });
+   },
+ }));
+diff --git a/vite.config.ts b/vite.config.ts
+index eef855f..ad821f0 100644
+--- a/vite.config.ts
++++ b/vite.config.ts
+@@ -7,6 +7,8 @@ import path from "path";
+ const host = process.env.TAURI_DEV_HOST;
+ 
+ export default defineConfig({
++  // Use relative paths for Tauri's embedded assets
++  base: "",
+   plugins: [react(), tailwindcss()],
+   clearScreen: false,
+   resolve: {
+-- 
+2.34.1
+

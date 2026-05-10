@@ -1,6 +1,6 @@
 use crate::state::AppState;
 use base64::Engine;
-use pebble_core::{Message, PebbleError, PrivacyMode, RenderedHtml, TrustType};
+use pebble_core::{Message, PebbleError, PrivacyMode, RenderedHtml};
 use pebble_privacy::PrivacyGuard;
 use pebble_store::Store;
 use std::collections::HashMap;
@@ -61,13 +61,13 @@ pub async fn get_message_with_html(
 }
 
 #[tauri::command]
-pub async fn is_trusted_sender(
+pub async fn is_untrusted_sender(
     state: State<'_, AppState>,
     account_id: String,
     email: String,
 ) -> std::result::Result<bool, PebbleError> {
     let store = state.store.clone();
-    tokio::task::spawn_blocking(move || Ok(store.is_trusted_sender(&account_id, &email)?.is_some()))
+    tokio::task::spawn_blocking(move || Ok(store.is_untrusted_sender(&account_id, &email)?))
         .await
         .map_err(|e| PebbleError::Internal(format!("Task join error: {e}")))?
 }
@@ -133,20 +133,27 @@ fn html_escape_attr(s: &str) -> String {
         .replace('>', "&gt;")
 }
 
+/// Resolve the effective privacy mode for a message.
+///
+/// New design:
+/// - Default: all senders are trusted → no blocking.
+/// - Only senders in the **untrusted sender list** get tracker protection applied.
+/// - Images are NEVER blocked by any privacy mode.
 fn resolve_privacy_mode(
     store: &Store,
     message: &Message,
     privacy_mode: PrivacyMode,
 ) -> std::result::Result<PrivacyMode, PebbleError> {
     match privacy_mode {
-        PrivacyMode::Strict | PrivacyMode::LoadOnce => {
-            match store.is_trusted_sender(&message.account_id, &message.from_address)? {
-                Some(TrustType::All) => Ok(PrivacyMode::TrustSender(message.from_address.clone())),
-                Some(TrustType::Images) => Ok(PrivacyMode::LoadOnce),
-                None => Ok(privacy_mode),
+        PrivacyMode::Normal | PrivacyMode::Strict => {
+            // If sender is NOT in the untrusted list → no blocking (Off)
+            if store.is_untrusted_sender(&message.account_id, &message.from_address)? {
+                Ok(privacy_mode)
+            } else {
+                Ok(PrivacyMode::Off)
             }
         }
-        PrivacyMode::TrustSender(_) | PrivacyMode::Off => Ok(privacy_mode),
+        PrivacyMode::Off => Ok(privacy_mode),
     }
 }
 
@@ -155,7 +162,7 @@ mod tests {
     use super::*;
     use pebble_core::{
         new_id, now_timestamp, Account, EmailAddress, Folder, FolderRole, FolderType, Message,
-        ProviderType, TrustType, TrustedSender,
+        ProviderType, UntrustedSender,
     };
 
     fn make_account(id: &str) -> Account {
@@ -221,33 +228,49 @@ mod tests {
         }
     }
 
-    fn store_with_trusted_sender(trust_type: TrustType) -> (Store, Message) {
+    #[test]
+    fn untrusted_sender_gets_tracker_blocking() {
         let store = Store::open_in_memory().unwrap();
         let account = make_account("account-1");
         store.insert_account(&account).unwrap();
         let folder = make_folder(&account.id);
         store.insert_folder(&folder).unwrap();
-        let message = make_message(&account.id, "trusted@example.com");
-        store.insert_message(&message, &[folder.id]).unwrap();
+        let message = make_message(&account.id, "spammy@spam.com");
+        store.insert_message(&message, &[folder.id.clone()]).unwrap();
         store
-            .trust_sender(&TrustedSender {
-                account_id: account.id,
-                email: "trusted@example.com".to_string(),
-                trust_type,
+            .add_untrusted_sender(&UntrustedSender {
+                account_id: account.id.clone(),
+                email: "spammy@spam.com".to_string(),
                 created_at: now_timestamp(),
             })
             .unwrap();
-        (store, message)
+
+        // Untrusted sender + Strict mode → keeps Strict
+        let mode = resolve_privacy_mode(&store, &message, PrivacyMode::Strict).unwrap();
+        assert_eq!(mode, PrivacyMode::Strict);
+
+        // Untrusted sender + Normal mode → keeps Normal
+        let mode = resolve_privacy_mode(&store, &message, PrivacyMode::Normal).unwrap();
+        assert_eq!(mode, PrivacyMode::Normal);
+
+        // Untrusted sender + Off mode → Off (blocking disabled)
+        let mode = resolve_privacy_mode(&store, &message, PrivacyMode::Off).unwrap();
+        assert_eq!(mode, PrivacyMode::Off);
     }
 
     #[test]
-    fn all_trusted_sender_overrides_relaxed_mode() {
-        let (store, message) = store_with_trusted_sender(TrustType::All);
+    fn trusted_sender_by_default_no_blocking() {
+        let store = Store::open_in_memory().unwrap();
+        let account = make_account("account-1");
+        store.insert_account(&account).unwrap();
+        let folder = make_folder(&account.id);
+        store.insert_folder(&folder).unwrap();
+        // NOT in untrusted list = trusted by default
+        let message = make_message(&account.id, "friend@example.com");
+        store.insert_message(&message, &[folder.id.clone()]).unwrap();
 
-        let mode = resolve_privacy_mode(&store, &message, PrivacyMode::LoadOnce).unwrap();
-
-        assert!(
-            matches!(mode, PrivacyMode::TrustSender(sender) if sender == "trusted@example.com")
-        );
+        // Even Strict mode → Off (no untrusted senders)
+        let mode = resolve_privacy_mode(&store, &message, PrivacyMode::Strict).unwrap();
+        assert_eq!(mode, PrivacyMode::Off);
     }
 }

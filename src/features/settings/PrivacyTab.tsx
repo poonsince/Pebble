@@ -2,8 +2,8 @@ import { useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { useMailStore } from "@/stores/mail.store";
 import { useToastStore } from "@/stores/toast.store";
-import { listTrustedSenders, removeTrustedSender } from "@/lib/api";
-import type { TrustedSender } from "@/lib/api";
+import { listUntrustedSenders, removeUntrustedSender } from "@/lib/api";
+import type { UntrustedSender } from "@/lib/api";
 import {
   PRIVACY_MODE_KEY,
   readStoredPrivacyMode,
@@ -14,27 +14,27 @@ import { Trash2 } from "lucide-react";
 export default function PrivacyTab() {
   const { t } = useTranslation();
   const activeAccountId = useMailStore((s) => s.activeAccountId);
-  const [trustedSenders, setTrustedSenders] = useState<TrustedSender[]>([]);
+  const [untrustedSenders, setUntrustedSenders] = useState<UntrustedSender[]>([]);
   const [privacyMode, setPrivacyMode] = useState<StoredPrivacyMode>(() =>
     readStoredPrivacyMode(),
   );
 
   useEffect(() => {
     if (!activeAccountId) {
-      setTrustedSenders((prev) => prev.length === 0 ? prev : []);
+      setUntrustedSenders((prev) => prev.length === 0 ? prev : []);
       return;
     }
 
     let cancelled = false;
-    listTrustedSenders(activeAccountId)
+    listUntrustedSenders(activeAccountId)
       .then((senders) => {
-        if (!cancelled) setTrustedSenders(senders);
+        if (!cancelled) setUntrustedSenders(senders);
       })
       .catch((err) => {
         if (cancelled) return;
-        console.warn("Failed to load trusted senders", err);
+        console.warn("Failed to load untrusted senders", err);
         useToastStore.getState().addToast({
-          message: t("privacy.loadTrustedFailed", "Failed to load trusted senders"),
+          message: t("privacy.loadUntrustedFailed", "Failed to load untrusted senders"),
           type: "error",
         });
       });
@@ -47,15 +47,15 @@ export default function PrivacyTab() {
     localStorage.setItem(PRIVACY_MODE_KEY, mode);
   }
 
-  async function handleRemoveTrust(email: string) {
+  async function handleRemoveUntrusted(email: string) {
     if (!activeAccountId) return;
     try {
-      await removeTrustedSender(activeAccountId, email);
-      setTrustedSenders((prev) => prev.filter((s) => s.email !== email));
+      await removeUntrustedSender(activeAccountId, email);
+      setUntrustedSenders((prev) => prev.filter((s) => s.email !== email));
     } catch (err) {
-      console.warn("Failed to remove trusted sender", err);
+      console.warn("Failed to remove untrusted sender", err);
       useToastStore.getState().addToast({
-        message: t("privacy.removeTrustFailed", "Failed to remove trusted sender"),
+        message: t("privacy.removeUntrustedFailed", "Failed to remove untrusted sender"),
         type: "error",
       });
     }
@@ -99,7 +99,7 @@ export default function PrivacyTab() {
               fontSize: "13px",
             }}
           >
-            {t("privacy.relaxed", "Relaxed")}
+            {t("privacy.relaxed", "Normal")}
           </button>
           <button
             onClick={() => handlePrivacyModeChange("off")}
@@ -118,10 +118,10 @@ export default function PrivacyTab() {
         </div>
         <p style={{ fontSize: "12px", color: "var(--color-text-secondary)", marginTop: "6px" }}>
           {privacyMode === "strict"
-            ? t("privacy.strictDesc", "Block all external images and trackers by default. You can load images per-message.")
+            ? t("privacy.strictDesc", "Images always load. Known tracking pixels and tracker domains are blocked for senders in your untrusted list.")
             : privacyMode === "relaxed"
-            ? t("privacy.relaxedDesc", "Load external images by default. Trackers are still blocked.")
-            : t("privacy.offDesc", "No blocking. All external images and trackers are loaded directly.")}
+            ? t("privacy.relaxedDesc", "Same as Strict. Images load freely; only trackers from untrusted senders are blocked.")
+            : t("privacy.offDesc", "No tracking protection. All images and content load without restriction.")}
         </p>
       </div>
 
@@ -133,26 +133,26 @@ export default function PrivacyTab() {
         marginBottom: "24px",
         fontSize: "13px",
       }}>
-        <strong>{t("privacy.trackerBlocking", "Tracker blocking")}</strong>
+        <strong>{t("privacy.trackerBlocking", "How it works")}</strong>
         <p style={{ margin: "4px 0 0", color: "var(--color-text-secondary)", fontSize: "12px" }}>
           {privacyMode === "off"
-            ? t("privacy.trackerBlockingOff", "Tracker blocking is disabled in Off mode. All images and trackers are loaded directly.")
-            : t("privacy.trackerBlockingDesc", "Known tracking pixels and tracker domains are blocked unless privacy is Off or the sender is fully trusted.")}
+            ? t("privacy.trackerBlockingOff", "Tracker blocking is disabled in Off mode. All images and content are loaded without restriction.")
+            : t("privacy.trackerBlockingDesc", "External images are always loaded. Only known tracking pixels and tracker domains are blocked, and only for senders you've added to your untrusted sender list by tapping the banner at the top of a message.")}
         </p>
       </div>
 
-      {/* Trusted senders */}
+      {/* Untrusted senders */}
       <div>
         <h3 style={{ fontSize: "14px", fontWeight: 600, marginBottom: "12px" }}>
-          {t("privacy.trustedSenders", "Trusted Senders")}
+          {t("privacy.untrustedSenders", "Untrusted Senders")}
         </h3>
-        {trustedSenders.length === 0 ? (
+        {untrustedSenders.length === 0 ? (
           <p style={{ fontSize: "13px", color: "var(--color-text-secondary)" }}>
-            {t("privacy.noTrustedSenders", "No trusted senders yet. Trust a sender from the privacy banner in a message.")}
+            {t("privacy.noUntrustedSenders", "No untrusted senders. By default, all senders are trusted and no tracker blocking is applied. Tap the banner on a message to block a sender's trackers.")}
           </p>
         ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
-            {trustedSenders.map((sender) => (
+            {untrustedSenders.map((sender) => (
               <div
                 key={sender.email}
                 style={{
@@ -165,23 +165,9 @@ export default function PrivacyTab() {
                   fontSize: "13px",
                 }}
               >
-                <div>
-                  <span>{sender.email}</span>
-                  <span style={{
-                    marginLeft: "8px",
-                    fontSize: "11px",
-                    padding: "2px 6px",
-                    borderRadius: "4px",
-                    backgroundColor: sender.trust_type === "all" ? "var(--color-accent)" : "var(--color-bg-hover)",
-                    color: sender.trust_type === "all" ? "#fff" : "var(--color-text-secondary)",
-                  }}>
-                    {sender.trust_type === "all"
-                      ? t("privacy.trustAll", "Trust sender")
-                      : t("privacy.trustImages", "Trust images")}
-                  </span>
-                </div>
+                <span>{sender.email}</span>
                 <button
-                  onClick={() => handleRemoveTrust(sender.email)}
+                  onClick={() => handleRemoveUntrusted(sender.email)}
                   title={t("common.delete", "Delete")}
                   style={{
                     background: "none",

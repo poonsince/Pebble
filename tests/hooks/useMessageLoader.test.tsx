@@ -81,10 +81,10 @@ describe("useMessageLoader", () => {
 
     await waitFor(() => expect(getMessageWithHtml).toHaveBeenCalledOnce());
 
-    rerender({ privacyMode: "LoadOnce" as const });
+    rerender({ privacyMode: "Normal" as const });
 
     await waitFor(() => expect(getRenderedHtml).toHaveBeenCalledOnce());
-    expect(getRenderedHtml).toHaveBeenCalledWith("message-1", "LoadOnce");
+    expect(getRenderedHtml).toHaveBeenCalledWith("message-1", "Normal");
     expect(getMessageWithHtml).toHaveBeenCalledOnce();
   });
 
@@ -110,7 +110,7 @@ describe("useMessageLoader", () => {
 
     await waitFor(() => expect(result.current.message?.id).toBe("message-1"));
 
-    rerender({ privacyMode: "LoadOnce" as const });
+    rerender({ privacyMode: "Normal" as const });
 
     await waitFor(() => expect(result.current.error).toBe("render failed"));
     expect(result.current.message?.id).toBe("message-1");

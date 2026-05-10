@@ -1,36 +1,34 @@
 use crate::state::AppState;
-use pebble_core::{now_timestamp, PebbleError, TrustType, TrustedSender};
+use pebble_core::{now_timestamp, PebbleError, UntrustedSender};
 use tauri::State;
 
 #[tauri::command]
-pub async fn trust_sender(
+pub async fn add_untrusted_sender(
     state: State<'_, AppState>,
     account_id: String,
     email: String,
-    trust_type: TrustType,
 ) -> std::result::Result<(), PebbleError> {
-    let sender = TrustedSender {
+    let sender = UntrustedSender {
         account_id,
         email,
-        trust_type,
         created_at: now_timestamp(),
     };
-    state.store.trust_sender(&sender)
+    state.store.add_untrusted_sender(&sender)
 }
 
 #[tauri::command]
-pub async fn list_trusted_senders(
+pub async fn list_untrusted_senders(
     state: State<'_, AppState>,
     account_id: String,
-) -> std::result::Result<Vec<TrustedSender>, PebbleError> {
-    state.store.list_trusted_senders(&account_id)
+) -> std::result::Result<Vec<UntrustedSender>, PebbleError> {
+    state.store.list_untrusted_senders(&account_id)
 }
 
 #[tauri::command]
-pub async fn remove_trusted_sender(
+pub async fn remove_untrusted_sender(
     state: State<'_, AppState>,
     account_id: String,
     email: String,
 ) -> std::result::Result<(), PebbleError> {
-    state.store.remove_trusted_sender(&account_id, &email)
+    state.store.remove_untrusted_sender(&account_id, &email)
 }

@@ -1,68 +1,48 @@
-use pebble_core::{Result, TrustType, TrustedSender};
+use pebble_core::{Result, UntrustedSender};
 use rusqlite::{params, OptionalExtension};
 
 use crate::Store;
 
-fn trust_type_to_str(t: &TrustType) -> &'static str {
-    match t {
-        TrustType::Images => "images",
-        TrustType::All => "all",
-    }
-}
-
-fn str_to_trust_type(s: &str) -> TrustType {
-    match s {
-        "all" => TrustType::All,
-        _ => TrustType::Images,
-    }
-}
-
-fn row_to_trusted_sender(row: &rusqlite::Row) -> rusqlite::Result<TrustedSender> {
-    Ok(TrustedSender {
+fn row_to_untrusted_sender(row: &rusqlite::Row) -> rusqlite::Result<UntrustedSender> {
+    Ok(UntrustedSender {
         account_id: row.get(0)?,
         email: row.get(1)?,
-        trust_type: str_to_trust_type(&row.get::<_, String>(2)?),
-        created_at: row.get(3)?,
+        created_at: row.get(2)?,
     })
 }
 
 impl Store {
-    pub fn trust_sender(&self, sender: &TrustedSender) -> Result<()> {
+    pub fn add_untrusted_sender(&self, sender: &UntrustedSender) -> Result<()> {
         self.with_write(|conn| {
             conn.execute(
                 "INSERT OR REPLACE INTO trusted_senders (account_id, email, trust_type, created_at)
-                 VALUES (?1, ?2, ?3, ?4)",
-                params![
-                    sender.account_id,
-                    sender.email,
-                    trust_type_to_str(&sender.trust_type),
-                    sender.created_at,
-                ],
+                 VALUES (?1, ?2, 'all', ?3)",
+                params![sender.account_id, sender.email, sender.created_at],
             )?;
             Ok(())
         })
     }
 
-    pub fn is_trusted_sender(&self, account_id: &str, email: &str) -> Result<Option<TrustType>> {
+    pub fn is_untrusted_sender(&self, account_id: &str, email: &str) -> Result<bool> {
         self.with_read(|conn| {
             let result = conn
                 .query_row(
-                    "SELECT trust_type FROM trusted_senders WHERE account_id = ?1 AND email = ?2",
+                    "SELECT 1 FROM trusted_senders WHERE account_id = ?1 AND email = ?2",
                     params![account_id, email],
-                    |row| row.get::<_, String>(0),
+                    |_| Ok(()),
                 )
                 .optional()?;
-            Ok(result.map(|s| str_to_trust_type(&s)))
+            Ok(result.is_some())
         })
     }
 
-    pub fn list_trusted_senders(&self, account_id: &str) -> Result<Vec<TrustedSender>> {
+    pub fn list_untrusted_senders(&self, account_id: &str) -> Result<Vec<UntrustedSender>> {
         self.with_read(|conn| {
             let mut stmt = conn.prepare(
-                "SELECT account_id, email, trust_type, created_at
+                "SELECT account_id, email, created_at
                      FROM trusted_senders WHERE account_id = ?1",
             )?;
-            let rows = stmt.query_map(params![account_id], row_to_trusted_sender)?;
+            let rows = stmt.query_map(params![account_id], row_to_untrusted_sender)?;
             let mut senders = Vec::new();
             for row in rows {
                 senders.push(row?);
@@ -71,7 +51,7 @@ impl Store {
         })
     }
 
-    pub fn remove_trusted_sender(&self, account_id: &str, email: &str) -> Result<()> {
+    pub fn remove_untrusted_sender(&self, account_id: &str, email: &str) -> Result<()> {
         self.with_write(|conn| {
             conn.execute(
                 "DELETE FROM trusted_senders WHERE account_id = ?1 AND email = ?2",
@@ -88,7 +68,7 @@ mod tests {
     use crate::Store;
 
     #[test]
-    fn test_trust_sender_crud() {
+    fn test_untrusted_sender_crud() {
         let store = Store::open_in_memory().unwrap();
         let now = pebble_core::now_timestamp();
         let account = pebble_core::Account {
@@ -102,49 +82,27 @@ mod tests {
         };
         store.insert_account(&account).unwrap();
 
-        let sender = TrustedSender {
+        let sender = UntrustedSender {
             account_id: account.id.clone(),
-            email: "trusted@example.com".to_string(),
-            trust_type: TrustType::Images,
+            email: "spammy@example.com".to_string(),
             created_at: now,
         };
-        store.trust_sender(&sender).unwrap();
+        store.add_untrusted_sender(&sender).unwrap();
 
-        // Check trust
-        let trust = store
-            .is_trusted_sender(&account.id, "trusted@example.com")
-            .unwrap();
-        assert_eq!(trust, Some(TrustType::Images));
+        // Should be untrusted
+        assert!(store.is_untrusted_sender(&account.id, "spammy@example.com").unwrap());
 
-        // Unknown sender
-        let trust = store
-            .is_trusted_sender(&account.id, "unknown@example.com")
-            .unwrap();
-        assert_eq!(trust, None);
+        // Unknown sender should NOT be untrusted
+        assert!(!store.is_untrusted_sender(&account.id, "unknown@example.com").unwrap());
 
         // List
-        let senders = store.list_trusted_senders(&account.id).unwrap();
+        let senders = store.list_untrusted_senders(&account.id).unwrap();
         assert_eq!(senders.len(), 1);
-        assert_eq!(senders[0].email, "trusted@example.com");
-
-        // Upgrade trust
-        let sender2 = TrustedSender {
-            account_id: account.id.clone(),
-            email: "trusted@example.com".to_string(),
-            trust_type: TrustType::All,
-            created_at: now,
-        };
-        store.trust_sender(&sender2).unwrap();
-        let trust = store
-            .is_trusted_sender(&account.id, "trusted@example.com")
-            .unwrap();
-        assert_eq!(trust, Some(TrustType::All));
+        assert_eq!(senders[0].email, "spammy@example.com");
 
         // Remove
-        store
-            .remove_trusted_sender(&account.id, "trusted@example.com")
-            .unwrap();
-        let senders = store.list_trusted_senders(&account.id).unwrap();
+        store.remove_untrusted_sender(&account.id, "spammy@example.com").unwrap();
+        let senders = store.list_untrusted_senders(&account.id).unwrap();
         assert_eq!(senders.len(), 0);
     }
 }

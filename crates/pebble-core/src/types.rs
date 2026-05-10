@@ -188,18 +188,10 @@ pub struct SnoozedMessage {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TrustedSender {
+pub struct UntrustedSender {
     pub account_id: String,
     pub email: String,
-    pub trust_type: TrustType,
     pub created_at: i64,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "lowercase")]
-pub enum TrustType {
-    Images,
-    All,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -214,12 +206,11 @@ pub struct Rule {
     pub updated_at: i64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum PrivacyMode {
-    Strict,
-    TrustSender(String),
-    LoadOnce,
     Off,
+    Normal,
+    Strict,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

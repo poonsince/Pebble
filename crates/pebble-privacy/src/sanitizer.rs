@@ -98,7 +98,7 @@ impl PrivacyGuard {
 
         // Pre-process images before ammonia sanitization
         let preprocessed =
-            preprocess_images(&body_html, mode, &mut trackers_blocked, &mut images_blocked);
+            preprocess_images(&body_html, &mut trackers_blocked, &mut images_blocked);
         info!(
             preprocessed_len = preprocessed.len(),
             trackers = trackers_blocked.len(),
@@ -111,7 +111,7 @@ impl PrivacyGuard {
 
         // Sanitize with ammonia (style tags are stripped by ammonia, but
         // we re-inject the cleaned CSS afterwards.)
-        let sanitizer = build_sanitizer(mode);
+        let sanitizer = build_sanitizer();
         let mut clean_html = sanitizer.clean(&preprocessed).to_string();
         info!(
             pre_len = preprocessed.len(),
@@ -234,11 +234,9 @@ fn find_tag_end(html: &str) -> Option<usize> {
 
 /// Parse a CSS style string and keep only properties from the safe allowlist.
 ///
-/// In `Off` or `TrustSender` mode, external URLs in CSS (e.g. `background: url(...)`)
-/// are allowed so legitimate email decorations render correctly. In `Strict`/`LoadOnce`
-/// mode, `url()` and similar resource-loading CSS functions are blocked to prevent
-/// CSS-based tracking and data exfiltration.
-fn filter_css_properties(style: &str, mode: &PrivacyMode) -> String {
+/// Images and external URLs in CSS are NEVER blocked. Only XSS vectors
+/// (javascript:, vbscript:, data:, expression()) are removed.
+fn filter_css_properties(style: &str) -> String {
     const SAFE_PROPERTIES: &[&str] = &[
         "color",
         "background",
@@ -320,7 +318,7 @@ fn filter_css_properties(style: &str, mode: &PrivacyMode) -> String {
                 removed_props.push(format!("{prop} (not in allowlist)"));
                 return None;
             }
-            // Always block XSS vectors regardless of mode
+            // Block XSS vectors (always, regardless of mode)
             if value.contains("expression(")
                 || value.contains("javascript:")
                 || value.contains("vbscript:")
@@ -330,33 +328,10 @@ fn filter_css_properties(style: &str, mode: &PrivacyMode) -> String {
                 return None;
             }
 
-            // In Off / TrustSender mode, allow external URLs so email
-            // decorations (background images, etc.) work like in any
-            // regular mail client.
-            let is_restricted = matches!(mode, PrivacyMode::Strict | PrivacyMode::LoadOnce);
-
-            if is_restricted && prop == "background"
-                && !is_safe_background_shorthand_value(&value)
-            {
-                removed_props.push(format!("background: {value} (unsafe)"));
-                return None;
-            }
-
-            // Block resource-loading CSS in Strict/LoadOnce mode (prevents
-            // CSS-based tracking pixels and exfiltration via url()).
-            if is_restricted
-                && (value.contains("url(")
-                    || value.contains("image-set(")
-                    || value.contains("-webkit-image-set(")
-                    || value.contains("cross-fade(")
-                    || value.contains("element(")
-                    || value.contains("paint(")
-                    || value.contains("@import")
-                    || value.contains('\\'))
-            {
-                removed_props.push(format!("{prop}: {value} (restricted in current mode)"));
-                return None;
-            }
+            // url() and @import are ALLOWED — external images and CSS
+            // decorations are never blocked by any privacy mode. Only
+            // tracking pixels (<img> with known tracker domains) are
+            // blocked separately in preprocess_images.
             Some((*decl).to_string())
         })
         .collect::<Vec<String>>();
@@ -372,58 +347,9 @@ fn filter_css_properties(style: &str, mode: &PrivacyMode) -> String {
     allowed.join("; ")
 }
 
-fn is_safe_background_shorthand_value(value: &str) -> bool {
-    let trimmed = value.trim();
-    let without_important = trimmed
-        .strip_suffix("!important")
-        .map(str::trim)
-        .unwrap_or(trimmed);
-    let value = without_important.to_lowercase();
-    if value.is_empty()
-        || value.contains("url(")
-        || value.contains("image-set(")
-        || value.contains("-webkit-image-set(")
-        || value.contains("cross-fade(")
-        || value.contains("element(")
-        || value.contains("paint(")
-        || value.contains("expression(")
-        || value.contains("javascript:")
-        || value.contains("vbscript:")
-        || value.contains("data:")
-        || value.contains("@import")
-        || value.contains('\\')
-    {
-        return false;
-    }
-
-    matches!(value.as_str(), "none" | "transparent" | "currentcolor")
-        || is_hex_color(&value)
-        || is_css_color_function(&value)
-        || value.chars().all(|c| c.is_ascii_alphabetic())
-}
-
-fn is_hex_color(value: &str) -> bool {
-    let Some(hex) = value.strip_prefix('#') else {
-        return false;
-    };
-    matches!(hex.len(), 3 | 4 | 6 | 8) && hex.chars().all(|c| c.is_ascii_hexdigit())
-}
-
-fn is_css_color_function(value: &str) -> bool {
-    let Some(open_paren) = value.find('(') else {
-        return false;
-    };
-    if !value.ends_with(')') {
-        return false;
-    }
-    let function = &value[..open_paren];
-    if !matches!(function, "rgb" | "rgba" | "hsl" | "hsla") {
-        return false;
-    }
-    value[open_paren + 1..value.len() - 1]
-        .chars()
-        .all(|c| c.is_ascii_digit() || matches!(c, ' ' | '\t' | '.' | ',' | '%' | '/' | '+' | '-'))
-}
+// is_safe_background_shorthand_value, is_hex_color, is_css_color_function
+// were removed — background shorthand validation is no longer needed since
+// url() in CSS is allowed in all privacy modes.
 
 /// Extract <style> blocks from HTML, clean their CSS content, and return
 /// (html_without_style_blocks, vec_of_cleaned_css).
@@ -649,7 +575,7 @@ fn find_matching_brace(s: &str, open_pos: usize) -> Option<usize> {
 }
 
 /// Build an ammonia sanitizer configured for safe email HTML rendering.
-fn build_sanitizer(mode: &PrivacyMode) -> Builder<'static> {
+fn build_sanitizer() -> Builder<'static> {
     let mut builder = Builder::new();
 
     // Allow safe tags for email HTML
@@ -782,10 +708,9 @@ fn build_sanitizer(mode: &PrivacyMode) -> Builder<'static> {
     builder.link_rel(Some("noopener noreferrer"));
 
     // Filter style attributes using a CSS property allowlist
-    let mode = mode.clone();
-    builder.attribute_filter(move |_element, attribute, value| {
+    builder.attribute_filter(|_element, attribute, value| {
         if attribute == "style" {
-            let filtered = filter_css_properties(value, &mode);
+            let filtered = filter_css_properties(value);
             if filtered.is_empty() {
                 None
             } else {
@@ -812,7 +737,6 @@ fn preprocessed_len_unchanged(preprocessed: &str, original: &str) -> bool {
 /// quoting, whitespace variations, encoding tricks).
 fn preprocess_images(
     html: &str,
-    mode: &PrivacyMode,
     trackers_blocked: &mut Vec<TrackerInfo>,
     images_blocked: &mut u32,
 ) -> String {
@@ -822,7 +746,6 @@ fn preprocess_images(
     // closure passed to lol_html (which requires 'static-compatible FnMut).
     let trackers = RefCell::new(trackers_blocked);
     let blocked = RefCell::new(images_blocked);
-    let mode = mode.clone();
 
     let result = lol_html::rewrite_str(
         html,
@@ -848,7 +771,6 @@ fn preprocess_images(
                     src.as_deref(),
                     width.as_deref(),
                     height.as_deref(),
-                    &mode,
                     &mut trackers.borrow_mut(),
                     &mut blocked.borrow_mut(),
                 );
@@ -856,24 +778,6 @@ fn preprocess_images(
                 match action {
                     ImgAction::Remove => {
                         el.remove();
-                    }
-                    ImgAction::BlockedPlaceholder => {
-                        let src_val = src.as_deref().unwrap_or("");
-                        let alt_val = el.get_attribute("alt").unwrap_or_default();
-                        let label = if alt_val.trim().is_empty() {
-                            "Image blocked for privacy".to_string()
-                        } else {
-                            alt_val
-                        };
-                        let escaped_src = html_escape(src_val);
-                        let escaped_label = html_escape(&label);
-                        el.replace(
-                            &format!(
-                                r#"<div class="blocked-image" data-src="{}">{}</div>"#,
-                                escaped_src, escaped_label
-                            ),
-                            lol_html::html_content::ContentType::Html,
-                        );
                     }
                     ImgAction::Keep => { /* leave element untouched */ }
                 }
@@ -896,7 +800,6 @@ fn preprocess_images(
 
 enum ImgAction {
     Remove,
-    BlockedPlaceholder,
     Keep,
 }
 
@@ -904,14 +807,11 @@ fn process_img_tag(
     src: Option<&str>,
     width: Option<&str>,
     height: Option<&str>,
-    mode: &PrivacyMode,
     trackers_blocked: &mut Vec<TrackerInfo>,
-    images_blocked: &mut u32,
+    _images_blocked: &mut u32,
 ) -> ImgAction {
-    // Off mode and fully trusted senders bypass image/tracker blocking.
-    if matches!(mode, PrivacyMode::Off | PrivacyMode::TrustSender(_)) {
-        return ImgAction::Keep;
-    }
+    // External images are NEVER blocked by any privacy mode.
+    // Only tracking pixels and known tracker domains are blocked.
 
     // Tracking pixels are always blocked
     if is_tracking_pixel(width, height) {
@@ -932,20 +832,6 @@ fn process_img_tag(
                     tracker_type: "domain".to_string(),
                 });
                 return ImgAction::Remove;
-            }
-        }
-
-        // External images depend on privacy mode
-        let is_external = src_val.starts_with("http://") || src_val.starts_with("https://");
-        if is_external {
-            match mode {
-                PrivacyMode::Strict => {
-                    *images_blocked += 1;
-                    return ImgAction::BlockedPlaceholder;
-                }
-                PrivacyMode::LoadOnce | PrivacyMode::TrustSender(_) | PrivacyMode::Off => {
-                    return ImgAction::Keep;
-                }
             }
         }
     }
@@ -1260,56 +1146,46 @@ mod tests {
     }
 
     #[test]
-    fn test_blocks_external_images_in_strict_mode() {
+    fn test_allows_external_images_in_all_modes() {
         let guard = PrivacyGuard::new();
         let html = r#"<p>Hello</p><img src="https://example.com/photo.jpg"><p>World</p>"#;
+        // External images are NEVER blocked by any privacy mode
         let result = guard.render_safe_html(html, &PrivacyMode::Strict);
-        assert!(result.html.contains("blocked-image"));
-        assert_eq!(result.images_blocked, 1);
-    }
-
-    #[test]
-    fn test_allows_images_in_load_once_mode() {
-        let guard = PrivacyGuard::new();
-        let html = r#"<p>Hello</p><img src="https://example.com/photo.jpg"><p>World</p>"#;
-        let result = guard.render_safe_html(html, &PrivacyMode::LoadOnce);
+        assert!(result.html.contains("https://example.com/photo.jpg"));
+        assert_eq!(result.images_blocked, 0);
+        let result = guard.render_safe_html(html, &PrivacyMode::Normal);
+        assert!(result.html.contains("https://example.com/photo.jpg"));
+        assert_eq!(result.images_blocked, 0);
+        let result = guard.render_safe_html(html, &PrivacyMode::Off);
         assert!(result.html.contains("https://example.com/photo.jpg"));
         assert_eq!(result.images_blocked, 0);
     }
 
     #[test]
-    fn test_still_blocks_trackers_in_load_once_mode() {
+    fn test_still_blocks_trackers_in_all_modes() {
         let guard = PrivacyGuard::new();
         let html = r#"<img src="https://tracking.mailchimp.com/open.gif" width="100" height="50">"#;
-        let result = guard.render_safe_html(html, &PrivacyMode::LoadOnce);
+        let result = guard.render_safe_html(html, &PrivacyMode::Normal);
         assert!(!result.html.contains("mailchimp.com"));
         assert_eq!(result.trackers_blocked.len(), 1);
     }
 
     #[test]
-    fn test_trust_sender_all_allows_tracking_pixels() {
+    fn test_tracking_pixels_always_blocked() {
         let guard = PrivacyGuard::new();
         let html = r#"<p>Hello</p><img src="https://tracker.example.com/pixel.gif" width="1" height="1"><p>World</p>"#;
-        let result = guard.render_safe_html(
-            html,
-            &PrivacyMode::TrustSender("trusted@example.com".to_string()),
-        );
-        assert!(result.html.contains("tracker.example.com"));
-        assert_eq!(result.trackers_blocked.len(), 0);
-        assert_eq!(result.images_blocked, 0);
+        let result = guard.render_safe_html(html, &PrivacyMode::Off);
+        assert!(!result.html.contains("tracker.example.com"));
+        assert_eq!(result.trackers_blocked.len(), 1);
     }
 
     #[test]
-    fn test_trust_sender_all_allows_known_tracker_domains() {
+    fn test_known_tracker_domains_always_blocked() {
         let guard = PrivacyGuard::new();
         let html = r#"<p>Hello</p><img src="https://tracking.mailchimp.com/open.gif" width="100" height="50"><p>World</p>"#;
-        let result = guard.render_safe_html(
-            html,
-            &PrivacyMode::TrustSender("trusted@example.com".to_string()),
-        );
-        assert!(result.html.contains("mailchimp.com"));
-        assert_eq!(result.trackers_blocked.len(), 0);
-        assert_eq!(result.images_blocked, 0);
+        let result = guard.render_safe_html(html, &PrivacyMode::Off);
+        assert!(!result.html.contains("mailchimp.com"));
+        assert_eq!(result.trackers_blocked.len(), 1);
     }
 
     #[test]
@@ -1324,27 +1200,13 @@ mod tests {
     }
 
     #[test]
-    fn test_blocks_css_url_exfiltration() {
+    fn test_allows_css_url_in_inline_styles() {
+        // url() in inline styles is now allowed in all modes.
+        // Only tracking pixels (<img>) are blocked by the privacy system.
         let guard = PrivacyGuard::new();
-        let html = r#"<p style="background: url('https://evil.com/steal')">text</p>"#;
+        let html = r#"<p style="background: url('https://cdn.example.com/bg.png')">text</p>"#;
         let result = guard.render_safe_html(html, &PrivacyMode::Strict);
-        assert!(!result.html.contains("evil.com"));
-    }
-
-    #[test]
-    fn test_blocks_escaped_css_url_exfiltration() {
-        let guard = PrivacyGuard::new();
-        let html = r#"<p style="background: u\72l('https://evil.com/steal')">text</p>"#;
-        let result = guard.render_safe_html(html, &PrivacyMode::Strict);
-        assert!(!result.html.contains("evil.com"));
-    }
-
-    #[test]
-    fn test_blocks_css_import() {
-        let guard = PrivacyGuard::new();
-        let html = r#"<div style="@import url('https://evil.com/exfil.css')">text</div>"#;
-        let result = guard.render_safe_html(html, &PrivacyMode::Strict);
-        assert!(!result.html.contains("evil.com"));
+        assert!(result.html.contains("cdn.example.com"), "url() should be allowed in Strict mode");
     }
 
     #[test]

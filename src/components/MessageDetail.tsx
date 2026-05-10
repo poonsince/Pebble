@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { ArrowLeft, Clock, Languages } from "lucide-react";
-import { trustSender } from "@/lib/api";
+import { addUntrustedSender } from "@/lib/api";
 import { useTranslation } from "react-i18next";
 import type { PrivacyMode, TranslateResult } from "@/lib/api";
 import { useClickOutside } from "@/hooks/useClickOutside";
@@ -38,7 +38,7 @@ function formatFullDate(timestamp: number): string {
 
 export default function MessageDetail({ messageId, onBack, folderRole }: Props) {
   const { t } = useTranslation();
-  const [privacyMode, setPrivacyMode] = useState<PrivacyMode>(() => defaultPrivacyMode());
+  const [privacyMode] = useState<PrivacyMode>(() => defaultPrivacyMode());
   const [showSnooze, setShowSnooze] = useState(false);
   const [showSelectionActions, setShowSelectionActions] = useState<{ text: string; position: { x: number; y: number } } | null>(null);
   const [showTranslate, setShowTranslate] = useState<{ text: string; position: { x: number; y: number } } | null>(null);
@@ -61,21 +61,20 @@ export default function MessageDetail({ messageId, onBack, folderRole }: Props) 
     resetBilingual();
   }, [messageId]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  function handleLoadImages() {
-    setPrivacyMode("LoadOnce");
-  }
-
-  async function handleTrustSender(trustType: "images" | "all") {
+  async function handleBlockSender() {
     if (message) {
-      if (trustType === "all") {
-        setPrivacyMode({ TrustSender: message.from_address });
-      } else {
-        setPrivacyMode("LoadOnce");
-      }
       try {
-        await trustSender(message.account_id, message.from_address, trustType);
+        await addUntrustedSender(message.account_id, message.from_address);
+        useToastStore.getState().addToast({
+          message: t("privacy.senderBlocked", "Sender added to untrusted list. Trackers will be blocked."),
+          type: "success",
+        });
       } catch (err) {
-        console.error("Failed to persist trusted sender:", err);
+        console.error("Failed to add untrusted sender:", err);
+        useToastStore.getState().addToast({
+          message: t("privacy.blockSenderFailed", "Failed to block sender trackers"),
+          type: "error",
+        });
       }
     }
   }
@@ -340,8 +339,7 @@ export default function MessageDetail({ messageId, onBack, folderRole }: Props) 
       {rendered && (
         <PrivacyBanner
           rendered={rendered}
-          onLoadImages={handleLoadImages}
-          onTrustSender={handleTrustSender}
+          onBlockSender={handleBlockSender}
         />
       )}
 

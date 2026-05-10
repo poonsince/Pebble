@@ -138,11 +138,12 @@ export interface SearchHit {
 }
 
 /**
- * Serde external tagging: unit variants serialize as strings, tuple variants
- * as `{ VariantName: value }`.
+ * Privacy mode controls tracker blocking only.
+ * Images are NEVER blocked by any mode.
+ * Tracker blocking only applies to senders in the "untrusted senders" list.
  * @rust pebble-core/src/types.rs → PrivacyMode
  */
-export type PrivacyMode = "Strict" | { TrustSender: string } | "LoadOnce" | "Off";
+export type PrivacyMode = "Off" | "Normal" | "Strict";
 
 // ─── Mail config types ──────────────────────────────────────────────────────────
 
@@ -219,14 +220,12 @@ export interface SnoozedMessage {
   return_to: string;
 }
 
-// ─── Trusted Sender types ───────────────────────────────────────────────────────
+// ─── Untrusted Sender types ──────────────────────────────────────────────────────
 
-/** @rust pebble-core/src/types.rs → TrustedSender */
-export interface TrustedSender {
+/** @rust pebble-core/src/types.rs → UntrustedSender */
+export interface UntrustedSender {
   account_id: string;
   email: string;
-  /** TrustType enum (rename_all = "lowercase") */
-  trust_type: "images" | "all";
   created_at: number;
 }
 

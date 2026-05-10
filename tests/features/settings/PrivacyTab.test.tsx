@@ -4,8 +4,8 @@ import PrivacyTab from "../../../src/features/settings/PrivacyTab";
 
 const mocks = vi.hoisted(() => ({
   activeAccountId: null as string | null,
-  listTrustedSenders: vi.fn(),
-  removeTrustedSender: vi.fn(),
+  listUntrustedSenders: vi.fn(),
+  removeUntrustedSender: vi.fn(),
 }));
 
 vi.mock("react-i18next", () => ({
@@ -26,15 +26,15 @@ vi.mock("../../../src/stores/toast.store", () => ({
 }));
 
 vi.mock("../../../src/lib/api", () => ({
-  listTrustedSenders: mocks.listTrustedSenders,
-  removeTrustedSender: mocks.removeTrustedSender,
+  listUntrustedSenders: mocks.listUntrustedSenders,
+  removeUntrustedSender: mocks.removeUntrustedSender,
 }));
 
 describe("PrivacyTab", () => {
   beforeEach(() => {
     mocks.activeAccountId = null;
-    mocks.listTrustedSenders.mockReset();
-    mocks.removeTrustedSender.mockReset();
+    mocks.listUntrustedSenders.mockReset();
+    mocks.removeUntrustedSender.mockReset();
   });
 
   it("selects relaxed as the default privacy mode when there is no stored preference", () => {
@@ -42,33 +42,32 @@ describe("PrivacyTab", () => {
 
     render(<PrivacyTab />);
 
-    expect(screen.getByText("Load external images by default. Trackers are still blocked.")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Relaxed" }).getAttribute("style")).toContain(
+    expect(screen.getByText("Same as Strict. Images load freely; only trackers from untrusted senders are blocked.")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Normal" }).getAttribute("style")).toContain(
       "var(--color-accent)",
     );
   });
 
-  it("clears trusted senders when there is no active account", async () => {
+  it("clears untrusted senders when there is no active account", async () => {
     mocks.activeAccountId = "account-1";
-    mocks.listTrustedSenders.mockResolvedValue([
+    mocks.listUntrustedSenders.mockResolvedValue([
       {
         account_id: "account-1",
-        email: "trusted@example.com",
-        trust_type: "all",
+        email: "spammy@example.com",
         created_at: 1,
       },
     ]);
 
     const { rerender } = render(<PrivacyTab />);
 
-    expect(await screen.findByText("trusted@example.com")).toBeTruthy();
+    expect(await screen.findByText("spammy@example.com")).toBeTruthy();
 
     mocks.activeAccountId = null;
     rerender(<PrivacyTab />);
 
     await waitFor(() => {
-      expect(screen.queryByText("trusted@example.com")).toBeNull();
+      expect(screen.queryByText("spammy@example.com")).toBeNull();
     });
-    expect(screen.getByText("No trusted senders yet. Trust a sender from the privacy banner in a message.")).toBeTruthy();
+    expect(screen.getByText("No untrusted senders. By default, all senders are trusted and no tracker blocking is applied. Tap the banner on a message to block a sender's trackers.")).toBeTruthy();
   });
 });

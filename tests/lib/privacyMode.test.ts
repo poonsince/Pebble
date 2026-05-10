@@ -8,7 +8,7 @@ import {
 describe("privacy mode defaults", () => {
   it("defaults to relaxed when no stored preference exists", () => {
     expect(readStoredPrivacyMode({ getItem: () => null })).toBe("relaxed");
-    expect(defaultPrivacyMode()).toBe("LoadOnce");
+    expect(defaultPrivacyMode()).toBe("Normal");
   });
 
   it("falls back to relaxed for unknown stored values", () => {
@@ -17,7 +17,7 @@ describe("privacy mode defaults", () => {
 
   it("maps stored privacy modes to render API modes", () => {
     expect(privacyModeToApi("strict")).toBe("Strict");
-    expect(privacyModeToApi("relaxed")).toBe("LoadOnce");
+    expect(privacyModeToApi("relaxed")).toBe("Normal");
     expect(privacyModeToApi("off")).toBe("Off");
   });
 });
