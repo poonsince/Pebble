@@ -99,7 +99,10 @@ export function ShadowDomEmail({ html, className }: ShadowDomEmailProps) {
     <iframe
       ref={iframeRef}
       className={className}
-      sandbox="allow-same-origin"
+      // sandbox intentionally removed: email HTML is already sanitized by
+      // Rust + DOMPurify. The sandbox attribute causes CDNs (e.g. Netease
+      // 163) to reject image requests with 405 due to Origin/Referer
+      // header changes in sandboxed iframes under Tauri's custom scheme.
       srcDoc={srcDoc}
       onLoad={handleLoad}
       title="Email content"
