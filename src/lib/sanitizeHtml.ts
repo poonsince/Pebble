@@ -5,6 +5,9 @@ import DOMPurify from "dompurify";
 const SAFE_STYLE_PROPERTIES = new Set([
   "background",
   "background-color",
+  "background-position",
+  "background-position-x",
+  "background-position-y",
   "border",
   "border-bottom",
   "border-collapse",
@@ -52,6 +55,7 @@ const SAFE_STYLE_PROPERTIES = new Set([
   "padding-left",
   "padding-right",
   "padding-top",
+  "position",
   "table-layout",
   "text-align",
   "text-decoration",
@@ -87,7 +91,7 @@ function isSafeBackgroundShorthandValue(value: string): boolean {
     return false;
   }
   if (
-    /(url\s*\(|image-set\s*\(|-webkit-image-set\s*\(|cross-fade\s*\(|element\s*\(|paint\s*\(|expression\s*\(|javascript:|vbscript:|data:|@import|\\)/i.test(
+    /(expression\s*\(|javascript:|vbscript:|data:|@import|\\)/i.test(
       normalized,
     )
   ) {
@@ -113,7 +117,7 @@ function filterStyleAttribute(style: string): string {
     if (!SAFE_STYLE_PROPERTIES.has(name) || !value) return false;
     if (name === "background") return isSafeBackgroundShorthandValue(value);
     if (value.includes("\\")) return false;
-    return !/(url\s*\(|expression\s*\(|javascript:|vbscript:|data:|@import)/i.test(value);
+    return !/(expression\s*\(|javascript:|vbscript:|data:|@import)/i.test(value);
   });
   const result = allowed.join("; ");
   if (allowed.length !== beforeCount) {

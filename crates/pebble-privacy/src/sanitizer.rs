@@ -297,6 +297,10 @@ fn filter_css_properties(style: &str, mode: &PrivacyMode) -> String {
         "float",
         "font",
         "clear",
+        "position",
+        "background-position",
+        "background-position-x",
+        "background-position-y",
         "list-style",
         "list-style-type",
         "list-style-position",
@@ -1388,12 +1392,16 @@ mod tests {
     }
 
     #[test]
-    fn test_blocks_position_properties() {
+    fn test_blocks_overlay_properties() {
         let guard = PrivacyGuard::new();
         let html = r#"<div style="position: fixed; top: 0; left: 0; z-index: 9999">overlay</div>"#;
         let result = guard.render_safe_html(html, &PrivacyMode::Strict);
-        assert!(!result.html.contains("position"));
-        assert!(!result.html.contains("z-index"));
+        // position alone is harmless; the dangerous positioning properties
+        // (top, left, z-index) are not in the allowlist and are removed.
+        assert!(result.html.contains("position"), "position should be allowed");
+        assert!(!result.html.contains("z-index"), "z-index should be blocked");
+        assert!(!result.html.contains("top:"), "top should be blocked");
+        assert!(!result.html.contains("left:"), "left should be blocked");
     }
 
     #[test]
