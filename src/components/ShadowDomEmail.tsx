@@ -20,8 +20,13 @@ export function ShadowDomEmail({ html, className }: ShadowDomEmailProps) {
   const cleanupRef = useRef<(() => void) | null>(null);
 
   const srcDoc = useMemo(() => {
+    // eslint-disable-next-line no-console
+    console.log(`[ShadowDomEmail] rendering HTML: len=${html.length}, first 200="${html.slice(0, 200)}..."`);
     const safeHtml = sanitizeHtmlDocumentForIframe(html);
-    return wrapHtmlDocumentForIframe(safeHtml, isDarkThemeActive());
+    const result = wrapHtmlDocumentForIframe(safeHtml, isDarkThemeActive());
+    // eslint-disable-next-line no-console
+    console.log(`[ShadowDomEmail] srcDoc produced: len=${result.length}, first 300="${result.slice(0, 300)}..."`);
+    return result;
   }, [html]);
 
   useLayoutEffect(() => {

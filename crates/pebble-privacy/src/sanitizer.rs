@@ -2,7 +2,7 @@ use std::collections::HashSet;
 
 use ammonia::Builder;
 use pebble_core::{PrivacyMode, RenderedHtml, TrackerInfo};
-use tracing::{debug, info, trace};
+use tracing::{debug, info, trace, warn};
 
 use crate::tracker::{is_known_tracker, is_tracking_pixel};
 
@@ -63,68 +63,110 @@ impl PrivacyGuard {
         // ammonia sanitization. We preserve them separately because ammonia
         // strips <style> tags (it treats them as `clean_content_tags`).
         let (html_without_styles, cleaned_styles) = extract_and_clean_styles(raw_html);
+        trace!(
+            after_extract_len = html_without_styles.len(),
+            "render_safe_html: extract_and_clean_styles done"
+        );
 
         if cleaned_styles.is_empty() {
-            trace!("render_safe_html: no <style> blocks found in input");
+            info!("render_safe_html: no <style> blocks found in input");
+            // Log first 500 chars of raw HTML to help debug missing styles
+            let preview = &raw_html[..raw_html.len().min(500)];
+            debug!(raw_preview = %preview, "render_safe_html: raw HTML preview (first 500 chars)");
         } else {
             info!(
                 count = cleaned_styles.len(),
                 total_css_len = cleaned_styles.iter().map(|s| s.len()).sum::<usize>(),
                 "render_safe_html: extracted and cleaned style blocks"
             );
-            // Log first 200 chars of first style block for debugging
+            // Log full first style block content for debugging
             if let Some(first) = cleaned_styles.first() {
-                let preview = &first[..first.len().min(200)];
-                debug!(css_preview = %preview, "render_safe_html: first style block preview");
+                let preview = &first[..first.len().min(500)];
+                debug!(css_preview = %preview, "render_safe_html: first style block preview (first 500 chars)");
             }
         }
 
         let body_html = extract_body_fragment(&html_without_styles);
-        trace!(
+        info!(
             body_len = body_html.len(),
             "render_safe_html: extracted body fragment"
+        );
+        trace!(
+            body_preview = &body_html[..body_html.len().min(300)],
+            "render_safe_html: body fragment start"
         );
 
         // Pre-process images before ammonia sanitization
         let preprocessed =
             preprocess_images(&body_html, mode, &mut trackers_blocked, &mut images_blocked);
+        info!(
+            preprocessed_len = preprocessed.len(),
+            trackers = trackers_blocked.len(),
+            images_blocked,
+            "render_safe_html: image pre-processing complete"
+        );
+        if preprocessed_len_unchanged(&preprocessed, &body_html) {
+            trace!("render_safe_html: preprocessed == body_html (no images modified)");
+        }
 
         // Sanitize with ammonia (style tags are stripped by ammonia, but
         // we re-inject the cleaned CSS afterwards.)
         let sanitizer = build_sanitizer(mode);
         let mut clean_html = sanitizer.clean(&preprocessed).to_string();
         info!(
-            ammonia_len = clean_html.len(),
+            pre_len = preprocessed.len(),
+            post_len = clean_html.len(),
             "render_safe_html: ammonia sanitization complete"
+        );
+        // Log first 200 chars before/after to understand what ammonia removed
+        let pre_start = &preprocessed[..preprocessed.len().min(200)];
+        let post_start = &clean_html[..clean_html.len().min(200)];
+        debug!(
+            before = %pre_start,
+            after = %post_start,
+            "render_safe_html: ammonia before/after start"
         );
 
         // Re-inject cleaned style blocks after sanitization
         if !cleaned_styles.is_empty() {
             let styles_joined = cleaned_styles.join("\n");
             let style_tag = format!("<style>\n{}\n</style>", styles_joined);
+            debug!(
+                style_tag_len = style_tag.len(),
+                style_tag_preview = &styles_joined[..styles_joined.len().min(200)],
+                "render_safe_html: style tag to inject"
+            );
 
             let inj_pos = if let Some(head_end) = clean_html.find("</head>") {
-                debug!("render_safe_html: injecting style before </head>");
+                debug!("render_safe_html: injecting style before </head> (pos={})", head_end);
                 head_end
             } else if let Some(body_start) = clean_html.find("<body") {
-                debug!("render_safe_html: injecting style after <body>");
+                debug!("render_safe_html: injecting style after <body> (body_start={})", body_start);
                 if let Some(tag_end) = find_tag_end(&clean_html[body_start..]) {
-                    body_start + tag_end + 1
+                    let pos = body_start + tag_end + 1;
+                    debug!("render_safe_html: <body> tag end at +{}, injection pos={}", tag_end, pos);
+                    pos
                 } else {
+                    warn!("render_safe_html: found <body> but could not find tag end");
                     0usize
                 }
             } else {
                 debug!("render_safe_html: injecting style at position 0 (no document structure)");
+                let has_html_like = clean_html.contains('<') && clean_html.contains('>');
+                if has_html_like {
+                    trace!("render_safe_html: output has HTML content (no document tags)");
+                }
                 0usize
             };
 
             clean_html.insert_str(inj_pos, &style_tag);
             info!(
                 final_len = clean_html.len(),
+                injected_len = style_tag.len(),
                 "render_safe_html: style blocks re-injected"
             );
             trace!(
-                html_preview = &clean_html[..clean_html.len().min(300)],
+                html_preview = &clean_html[..clean_html.len().min(500)],
                 "render_safe_html: output start"
             );
         }
@@ -273,20 +315,20 @@ fn filter_css_properties(style: &str) -> String {
         "table-layout",
     ];
 
-    style
-        .split(';')
+    let parts: Vec<&str> = style.split(';').map(|s| s.trim()).filter(|s| !s.is_empty()).collect();
+    let before = parts.len();
+    let allowed: Vec<String> = parts
+        .iter()
         .filter_map(|decl| {
-            let decl = decl.trim();
-            if decl.is_empty() {
-                return None;
-            }
             let colon = decl.find(':')?;
             let prop = decl[..colon].trim().to_lowercase();
             let value = decl[colon + 1..].trim().to_lowercase();
             if !SAFE_PROPERTIES.contains(&prop.as_str()) {
+                trace!(%prop, "filter_css_properties: property not in allowlist");
                 return None;
             }
             if prop == "background" && !is_safe_background_shorthand_value(&value) {
+                trace!(%value, "filter_css_properties: background shorthand rejected");
                 return None;
             }
             // Reject URL/script-bearing values and CSS escapes that can hide them.
@@ -305,10 +347,18 @@ fn filter_css_properties(style: &str) -> String {
             {
                 return None;
             }
-            Some(decl.to_string())
+            Some((*decl).to_string())
         })
-        .collect::<Vec<_>>()
-        .join("; ")
+        .collect::<Vec<String>>();
+
+    if allowed.len() != before {
+        trace!(
+            before,
+            after = allowed.len(),
+            "filter_css_properties: some properties removed"
+        );
+    }
+    allowed.join("; ")
 }
 
 fn is_safe_background_shorthand_value(value: &str) -> bool {
@@ -735,6 +785,12 @@ fn build_sanitizer(_mode: &PrivacyMode) -> Builder<'static> {
     });
 
     builder
+}
+
+/// Check if the preprocessed output is identical to the input.
+/// Used for logging to determine if image preprocessing modified the HTML.
+fn preprocessed_len_unchanged(preprocessed: &str, original: &str) -> bool {
+    preprocessed.len() == original.len()
 }
 
 /// Pre-process img tags before ammonia to handle tracking pixels and privacy modes.
