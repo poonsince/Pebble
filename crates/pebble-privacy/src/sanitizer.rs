@@ -537,7 +537,6 @@ fn clean_css_content(css: &str) -> String {
 
         // Skip rules with dangerous patterns
         let has_dangerous = [
-            "url(",
             "expression(",
             "javascript:",
             "vbscript:",
