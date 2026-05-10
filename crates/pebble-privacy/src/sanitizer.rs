@@ -4,6 +4,17 @@ use ammonia::Builder;
 use pebble_core::{PrivacyMode, RenderedHtml, TrackerInfo};
 use tracing::{debug, info, trace};
 
+/// Safely truncate a string to at most `max_chars` UTF-8 characters,
+/// returning a `&str` that is guaranteed to end on a char boundary.
+fn char_safe_truncate<'a>(s: &'a str, max_chars: usize) -> &'a str {
+    let byte_end = s
+        .char_indices()
+        .nth(max_chars)
+        .map(|(i, _)| i)
+        .unwrap_or(s.len());
+    &s[..byte_end]
+}
+
 use crate::tracker::{is_known_tracker, is_tracking_pixel};
 
 pub struct PrivacyGuard;
@@ -71,7 +82,7 @@ impl PrivacyGuard {
         if cleaned_styles.is_empty() {
             info!("render_safe_html: no <style> blocks found in input");
             // Log first 500 chars of raw HTML to help debug missing styles
-            let preview = &raw_html[..raw_html.len().min(500)];
+            let preview = char_safe_truncate(raw_html, 500);
             debug!(raw_preview = %preview, "render_safe_html: raw HTML preview (first 500 chars)");
         } else {
             info!(
@@ -81,7 +92,7 @@ impl PrivacyGuard {
             );
             // Log full first style block content for debugging
             if let Some(first) = cleaned_styles.first() {
-                let preview = &first[..first.len().min(500)];
+                let preview = char_safe_truncate(first, 500);
                 debug!(css_preview = %preview, "render_safe_html: first style block preview (first 500 chars)");
             }
         }
@@ -92,7 +103,7 @@ impl PrivacyGuard {
             "render_safe_html: extracted body fragment"
         );
         trace!(
-            body_preview = &body_html[..body_html.len().min(300)],
+            body_preview = char_safe_truncate(&body_html, 300),
             "render_safe_html: body fragment start"
         );
 
@@ -119,8 +130,8 @@ impl PrivacyGuard {
             "render_safe_html: ammonia sanitization complete"
         );
         // Log first 200 chars before/after to understand what ammonia removed
-        let pre_start = &preprocessed[..preprocessed.len().min(200)];
-        let post_start = &clean_html[..clean_html.len().min(200)];
+        let pre_start = char_safe_truncate(&preprocessed, 200);
+        let post_start = char_safe_truncate(&clean_html, 200);
         debug!(
             before = %pre_start,
             after = %post_start,
@@ -142,7 +153,7 @@ impl PrivacyGuard {
                 "render_safe_html: output wrapped in full HTML doc with style in <head>"
             );
             trace!(
-                html_preview = &clean_html[..clean_html.len().min(500)],
+                html_preview = char_safe_truncate(&clean_html, 500),
                 "render_safe_html: output start"
             );
         }
@@ -540,7 +551,7 @@ fn clean_css_content(css: &str) -> String {
             filtered.push_str(rule);
         } else {
             debug!(
-                rule = %rule[..rule.len().min(100)],
+                rule = %char_safe_truncate(rule, 100),
                 "clean_css_content: removed rule with unsafe content"
             );
         }
